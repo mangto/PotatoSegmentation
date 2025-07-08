@@ -125,11 +125,13 @@
   <ItemGroup>
     <ClCompile Include="image.c" />
     <ClCompile Include="main.c" />
+    <ClCompile Include="selective_search.c" />
     <ClCompile Include="test.c" />
     <ClCompile Include="utils.c" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="image.h" />
+    <ClInclude Include="selective_search.h" />
     <ClInclude Include="stb_image.h" />
     <ClInclude Include="test.h" />
     <ClInclude Include="utils.h" />

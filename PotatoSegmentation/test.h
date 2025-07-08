@@ -3,4 +3,6 @@
 
 int image_load_test();
 
+int pixel_distance_test();
+
 #endif // !__TEST_H__
