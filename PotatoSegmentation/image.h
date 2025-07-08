@@ -4,16 +4,22 @@
 #include <stdio.h>
 
 typedef struct {
-	int width, height, channels;
+	int width;
+	int height;
+	int channels;
 	unsigned char* pixels;
 } RawImage;
 
 typedef struct {
-	int r, g, b;
+	int r;
+	int g;
+	int b;
 } Pixel;
 
 typedef struct {
-	int width, height, channels;
+	int width;
+	int height;
+	int channels;
 	Pixel* pixels;
 } Image;
 
