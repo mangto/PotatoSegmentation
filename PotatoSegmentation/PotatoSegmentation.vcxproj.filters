@@ -27,7 +27,19 @@
     <ClCompile Include="utils.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="gbs.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="disjoint_set.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="selective_search.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="image_process.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="matrix.c">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
@@ -44,12 +56,27 @@
     <ClInclude Include="test.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="gbs.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="disjoint_set.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="selective_search.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="image_process.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="matrix.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <Image Include="test.jpg">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="test2.jpg">
       <Filter>Resource Files</Filter>
     </Image>
   </ItemGroup>

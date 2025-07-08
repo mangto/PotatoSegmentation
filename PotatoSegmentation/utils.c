@@ -1,5 +1,116 @@
 #include <stdio.h>
 #include <windows.h>
+#include <stdlib.h>
+#include <stdint.h>
+#include <stdbool.h>
+#include <string.h>
+#include <time.h>
+
+#include "image.h"
+#include "disjoint_set.h"
+
+void save_bmp(const char* filename, Pixel* data, int width, int height) {
+    FILE* f = fopen(filename, "wb");
+    if (!f) return;
+
+    int row_padded = (width * 3 + 3) & (~3);
+    int image_size = row_padded * height;
+
+    BITMAPFILEHEADER bfh = { 0 };
+    BITMAPINFOHEADER bih = { 0 };
+
+    bfh.bfType = 0x4D42;
+    bfh.bfSize = sizeof(BITMAPFILEHEADER) + sizeof(BITMAPINFOHEADER) + image_size;
+    bfh.bfOffBits = sizeof(BITMAPFILEHEADER) + sizeof(BITMAPINFOHEADER);
+
+    bih.biSize = sizeof(BITMAPINFOHEADER);
+    bih.biWidth = width;
+    bih.biHeight = -height; // top-down
+    bih.biPlanes = 1;
+    bih.biBitCount = 24;
+    bih.biCompression = 0;
+    bih.biSizeImage = image_size;
+
+    fwrite(&bfh, sizeof(bfh), 1, f);
+    fwrite(&bih, sizeof(bih), 1, f);
+
+    uint8_t* row = calloc(1, row_padded);
+    for (int y = 0; y < height; y++) {
+        for (int x = 0; x < width; x++) {
+            Pixel p = data[y * width + x];
+            row[x * 3 + 0] = p.b;
+            row[x * 3 + 1] = p.g;
+            row[x * 3 + 2] = p.r;
+        }
+        fwrite(row, 1, row_padded, f);
+    }
+    free(row);
+    fclose(f);
+}
+
+#define MAX_LABELS 1000000
+
+void visualize_labels(DisjointSet* ds, int pixel_count, const char* filename, int width, int height) {
+    int* labels = malloc(sizeof(int) * pixel_count);
+    if (!labels) {
+        fprintf(stderr, "malloc failed for labels\n");
+        return;
+    }
+
+    for (int i = 0; i < pixel_count; i++) {
+        labels[i] = ds_find(ds, i);
+    }
+
+    Pixel* output = malloc(sizeof(Pixel) * pixel_count);
+    if (!output) {
+        fprintf(stderr, "malloc failed for output\n");
+        free(labels);
+        return;
+    }
+
+    Pixel* label_colors = malloc(sizeof(Pixel) * MAX_LABELS);
+    if (!label_colors) {
+        fprintf(stderr, "malloc failed for label_colors\n");
+        free(labels);
+        free(output);
+        return;
+    }
+
+    bool* label_assigned = calloc(MAX_LABELS, sizeof(bool));
+    if (!label_assigned) {
+        fprintf(stderr, "calloc failed for label_assigned\n");
+        free(labels);
+        free(output);
+        free(label_colors);
+        return;
+    }
+
+    srand((unsigned int)time(NULL));
+
+    for (int i = 0; i < pixel_count; i++) {
+        int label = labels[i];
+        if (label < 0 || label >= MAX_LABELS) {
+            fprintf(stderr, "Warning: invalid label %d at pixel %d\n", label, i);
+            label = 0;
+        }
+        if (!label_assigned[label]) {
+            label_colors[label].r = rand() % 256;
+            label_colors[label].g = rand() % 256;
+            label_colors[label].b = rand() % 256;
+            label_assigned[label] = true;
+        }
+        output[i] = label_colors[label];
+    }
+
+    save_bmp(filename, output, width, height);
+
+    free(labels);
+    free(output);
+    free(label_colors);
+    free(label_assigned);
+}
+
+
 
 void list_files_in_current_dir() {
     WIN32_FIND_DATAA findData;
