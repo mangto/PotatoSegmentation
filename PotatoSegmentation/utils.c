@@ -84,6 +84,8 @@ void visualize_labels(DisjointSet* ds, int pixel_count, const char* filename, in
         free(label_colors);
         return;
     }
+    
+    ////////////////////////////////////////////////////////////////
 
     srand((unsigned int)time(NULL));
 
@@ -110,8 +112,6 @@ void visualize_labels(DisjointSet* ds, int pixel_count, const char* filename, in
     free(label_assigned);
 }
 
-
-
 void list_files_in_current_dir() {
     WIN32_FIND_DATAA findData;
 
@@ -133,4 +133,25 @@ void list_files_in_current_dir() {
     printf("--------------------------\n");
 
     FindClose(hFind);
+
+}
+
+
+void print_array_int(int* arr, int size) {
+    printf("[");
+    for (int i = 0; i < size; i++) {
+        printf("%d", arr[i]);
+        if (i < size - 1) printf(", ");
+    }
+    printf("]\n");
+}
+
+
+void print_array_float(float* arr, int size) {
+    printf("[");
+    for (int i = 0; i < size; i++) {
+        printf("%.2f", arr[i]);
+        if (i < size - 1) printf(", ");
+    }
+    printf("]\n");
 }

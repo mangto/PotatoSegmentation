@@ -35,4 +35,8 @@ void save_bmp(const char* filename, Pixel* data, int width, int height);
 
 void visualize_labels(DisjointSet* ds, int pixel_count, const char* filename, int width, int height);
 
+void print_array_int(int* arr, int size);
+
+void print_array_float(float* arr, int size);
+
 #endif // !__UTILS_H__

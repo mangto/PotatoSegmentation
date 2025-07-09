@@ -210,24 +210,70 @@ Matrix mat_sub(Matrix* mat1, Matrix* mat2) {
 }
 
 Matrix mat_dot(Matrix* mat1, Matrix* mat2) {
-    assert(is_same_shape(mat1, mat2));
+    assert(mat1 != NULL && mat1->shape != NULL);
+    assert(mat2 != NULL && mat2->shape != NULL);
+    assert(mat1->dims == 2 && mat2->dims == 2 && "mat_dot currently supports only 2D matrices.");
+
+    int R1 = mat1->shape[0];
+    int C1 = mat1->shape[1];
+    int R2 = mat2->shape[0];
+    int C2 = mat2->shape[1];
+
+    assert(C1 == R2 && "Matrix dimensions for dot product are incompatible (C1 != R2).");
 
     Matrix result;
-    int total = 1;
+    result.dims = 2;
+    result.shape = (int*)malloc(sizeof(int) * 2);
+    if (!result.shape) {
+        fprintf(stderr, "Memory allocation failed for result.shape in mat_dot.\n");
+        exit(EXIT_FAILURE);
+    }
+    result.shape[0] = R1;
+    result.shape[1] = C2;
 
-    for (int i = 0; i < mat1->dims; ++i) total *= mat1->shape[i];
-
-    result.dims = mat1->dims;
-    result.shape = malloc(sizeof(int) * mat1->dims);
-    memcpy(result.shape, mat1->shape, sizeof(int) * mat1->dims);
-
-    result.values = malloc(sizeof(float) * total);
-    for (int i = 0; i < total; ++i) {
-        result.values[i] = mat1->values[i] + mat1->values[i];
+    int total_elements = R1 * C2;
+    result.values = (float*)malloc(sizeof(float) * total_elements);
+    if (!result.values) {
+        fprintf(stderr, "Memory allocation failed for result.values in mat_dot.\n");
+        free(result.shape);
+        exit(EXIT_FAILURE);
     }
 
-    result.get = mat1->get;
-    result.set = mat1->set;
+    memset(result.values, 0, sizeof(float) * total_elements);
+
+    for (int i = 0; i < R1; ++i) {
+        for (int k = 0; k < C1; ++k) {
+
+            float mat1_ik = mat1->values[i * C1 + k];
+            for (int j = 0; j < C2; ++j) {
+                result.values[i * C2 + j] += mat1_ik * mat2->values[k * C2 + j];
+            }
+        }
+    }
+
+    result.get = mat_get;
+    result.set = mat_set;
 
     return result;
+}
+
+float mat_elemwise_dot_sum(Matrix* a, Matrix* b) {
+    assert(a != NULL && b != NULL);
+    assert(a->dims == b->dims);
+
+    for (int i = 0; i < a->dims; i++) {
+        assert(a->shape[i] == b->shape[i]);
+    }
+
+    int total = 1;
+    for (int i = 0; i < a->dims; i++) {
+        total *= a->shape[i];
+    }
+
+    float sum = 0.0f;
+    for (int i = 0; i < total; i++) {
+        sum += a->values[i] * b->values[i];
+    }
+
+    return sum;
 }

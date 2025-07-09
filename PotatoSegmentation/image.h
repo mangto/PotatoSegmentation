@@ -31,4 +31,6 @@ void free_image(Image* image);
 
 char* pixel_to_string(Pixel pixel);
 
+
+
 #endif // !__IMAGE_H_

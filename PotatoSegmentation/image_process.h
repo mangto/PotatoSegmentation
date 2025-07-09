@@ -6,6 +6,12 @@
 
 #include <stdio.h>
 
-void apply_kernel(Image* image, Matrix* kernel);
+Matrix grab_img_to_mat(Image* img, int x, int y, int size_x, int size_y);
+
+void grab_rgb(Matrix* img_mat, int* r, int* g, int* b);
+
+void apply_kernel(Image* img, Matrix* kernel);
+
+Matrix create_gaussian_kernel(int size, float sigma);
 
 #endif // !__IMAGE__PROCESS_H__

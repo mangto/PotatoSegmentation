@@ -1,7 +1,9 @@
 #include "image.h"
+#include "image_process.h"
 #include "gbs.h"
 #include "disjoint_set.h"
 #include "utils.h"
+#include "matrix.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -150,14 +152,23 @@ void merge_components(EdgeList* edges, DisjointSet* ds, int* size, float* intern
 }
 
 
-void graph_based_segmentation(Image* img, float k) {
+void graph_based_segmentation(DisjointSet* ds, Image* img, float k, float sigma) {
 	
 	EdgeList edges;
-	DisjointSet ds;
+	Matrix gaussian;
 
 	int pixel_count = img->width*img->height;
 	int* size = malloc(sizeof(int) * pixel_count);
 	float* internal = malloc(sizeof(float) * pixel_count);
+
+	int kernel_size = 5;
+	if (kernel_size % 2 == 0) {
+		printf("Caution: Automaticaaly change kernel size: %d -> %d\n", kernel_size, ++kernel_size);
+	}
+
+	gaussian = create_gaussian_kernel(kernel_size, sigma);
+
+	apply_kernel(img, &gaussian);
 
 	for (int i = 0; i < pixel_count; i++) {
 		size[i] = 1;
@@ -170,15 +181,12 @@ void graph_based_segmentation(Image* img, float k) {
 	
 	sort_edge_list(&edges);
 
-	ds_init(&ds, img->width * img->height);
+	ds_init(ds, img->width * img->height);
 
-	merge_components(&edges, &ds, size, internal, k);
-
-	visualize_labels(&ds, pixel_count, "gbs.bmp", img->width, img->height);
+	merge_components(&edges, ds, size, internal, k);
 
 	free_edges(&edges);
-	ds_free(&ds);
+	free_matrix(&gaussian);
 	free(size);
 	free(internal);
-
 }

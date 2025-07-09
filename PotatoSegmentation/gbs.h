@@ -36,6 +36,6 @@ void sort_edge_list(EdgeList* list);
 
 void merge_components(EdgeList* edges, DisjointSet* ds, int* size, float* internal, float k);
 
-void graph_based_segmentation(Image* img, float k);
+void graph_based_segmentation(DisjointSet* ds, Image* img, float k, float sigma);
 
 #endif // !__GBS__
