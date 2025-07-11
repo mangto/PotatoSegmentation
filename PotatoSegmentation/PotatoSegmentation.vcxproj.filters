@@ -73,22 +73,16 @@
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
+    <Image Include="test_bf_ssm.bmp">
+      <Filter>Source Files\Resource Files</Filter>
+    </Image>
+    <Image Include="test_af_ssm.bmp">
+      <Filter>Source Files\Resource Files</Filter>
+    </Image>
     <Image Include="test.jpg">
       <Filter>Source Files\Resource Files</Filter>
     </Image>
     <Image Include="test2.jpg">
-      <Filter>Source Files\Resource Files</Filter>
-    </Image>
-    <Image Include="gbs_with_kernel.bmp">
-      <Filter>Source Files\Resource Files</Filter>
-    </Image>
-    <Image Include="gbs_no_kernel.bmp">
-      <Filter>Source Files\Resource Files</Filter>
-    </Image>
-    <Image Include="gbs.bmp">
-      <Filter>Source Files\Resource Files</Filter>
-    </Image>
-    <Image Include="kernel.bmp">
       <Filter>Source Files\Resource Files</Filter>
     </Image>
   </ItemGroup>

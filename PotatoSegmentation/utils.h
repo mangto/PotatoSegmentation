@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 #include "disjoint_set.h"
+#include "selective_search.h"
 
 #pragma pack(push, 1)
 typedef struct {
@@ -33,7 +34,9 @@ void list_files_in_current_dir();
 
 void save_bmp(const char* filename, Pixel* data, int width, int height);
 
-void visualize_labels(DisjointSet* ds, int pixel_count, const char* filename, int width, int height);
+void visualize_labels(DisjointSet* ds, const char* filename, int width, int height);
+
+void visualize_regions(RegionList* rl, int width, int height, const char* filename);
 
 void print_array_int(int* arr, int size);
 

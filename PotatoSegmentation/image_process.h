@@ -6,6 +6,8 @@
 
 #include <stdio.h>
 
+void contrast_stretch(Image* img, float factor);
+
 Matrix grab_img_to_mat(Image* img, int x, int y, int size_x, int size_y);
 
 void grab_rgb(Matrix* img_mat, int* r, int* g, int* b);

@@ -145,14 +145,14 @@
     <ClInclude Include="utils.h" />
   </ItemGroup>
   <ItemGroup>
-    <Image Include="gbs.bmp" />
-    <Image Include="gbs_no_kernel.bmp" />
-    <Image Include="gbs_with_kernel.bmp" />
-    <Image Include="kernel.bmp" />
     <Image Include="test.jpg">
       <DeploymentContent>true</DeploymentContent>
     </Image>
-    <Image Include="test2.jpg">
+    <Image Include="test2.jpg" />
+    <Image Include="test_af_ssm.bmp">
+      <DeploymentContent>true</DeploymentContent>
+    </Image>
+    <Image Include="test_bf_ssm.bmp">
       <DeploymentContent>true</DeploymentContent>
     </Image>
   </ItemGroup>

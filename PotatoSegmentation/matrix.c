@@ -162,6 +162,8 @@ int is_same_shape(Matrix* mat1, Matrix* mat2) {
     return 1;
 }
 
+
+
 Matrix mat_add(Matrix* mat1, Matrix* mat2) {
     assert(is_same_shape(mat1, mat2));
     

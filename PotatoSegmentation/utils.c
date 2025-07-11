@@ -7,6 +7,7 @@
 #include <time.h>
 
 #include "image.h"
+#include "selective_search.h"
 #include "disjoint_set.h"
 
 void save_bmp(const char* filename, Pixel* data, int width, int height) {
@@ -50,7 +51,8 @@ void save_bmp(const char* filename, Pixel* data, int width, int height) {
 
 #define MAX_LABELS 1000000
 
-void visualize_labels(DisjointSet* ds, int pixel_count, const char* filename, int width, int height) {
+void visualize_labels(DisjointSet* ds, const char* filename, int width, int height) {
+    int pixel_count = width * height;
     int* labels = malloc(sizeof(int) * pixel_count);
     if (!labels) {
         fprintf(stderr, "malloc failed for labels\n");
@@ -112,6 +114,64 @@ void visualize_labels(DisjointSet* ds, int pixel_count, const char* filename, in
     free(label_assigned);
 }
 
+void visualize_regions(RegionList* rl, int width, int height, const char* filename) {
+    Pixel* output = malloc(sizeof(Pixel) * width * height);
+    if (!output) return;
+
+    int* label_map = malloc(sizeof(int) * width * height);
+    if (!label_map) {
+        free(output);
+        return;
+    }
+
+    for (int i = 0; i < width * height; i++) label_map[i] = -1;
+
+    Pixel* region_colors = malloc(sizeof(Pixel) * rl->count);
+    if (!region_colors) {
+        free(output);
+        free(label_map);
+        return;
+    }
+
+    srand((unsigned int)time(NULL));
+    for (int i = 0; i < rl->count; i++) {
+        region_colors[i].r = rand() % 256;
+        region_colors[i].g = rand() % 256;
+        region_colors[i].b = rand() % 256;
+    }
+
+    for (int i = 0; i < rl->count; i++) {
+        Region* r = &rl->regions[i];
+        for (int y = r->min_y; y <= r->max_y; y++) {
+            for (int x = r->min_x; x <= r->max_x; x++) {
+                int idx = y * width + x;
+                if (idx < 0 || idx >= width * height) continue;
+                label_map[idx] = i;
+            }
+        }
+    }
+
+    for (int i = 0; i < width * height; i++) {
+        int label = label_map[i];
+        if (label >= 0 && label < rl->count) {
+            output[i] = region_colors[label];
+        }
+        else {
+            output[i].r = 0;
+            output[i].g = 0;
+            output[i].b = 0;
+        }
+    }
+
+    save_bmp(filename, output, width, height);
+
+    free(output);
+    free(label_map);
+    free(region_colors);
+}
+
+
+
 void list_files_in_current_dir() {
     WIN32_FIND_DATAA findData;
 
@@ -136,7 +196,6 @@ void list_files_in_current_dir() {
 
 }
 
-
 void print_array_int(int* arr, int size) {
     printf("[");
     for (int i = 0; i < size; i++) {
@@ -145,7 +204,6 @@ void print_array_int(int* arr, int size) {
     }
     printf("]\n");
 }
-
 
 void print_array_float(float* arr, int size) {
     printf("[");

@@ -7,6 +7,50 @@
 #include <stdlib.h>
 #include <assert.h>
 
+void contrast_stretch(Image* img, float factor) {
+    if (factor <= 0.0f) return;
+
+    for (int c = 0; c < 3; c++) {
+        int min_val = 255, max_val = 0;
+
+        for (int i = 0; i < img->width * img->height; i++) {
+            unsigned char val;
+            if (c == 0) val = img->pixels[i].r;
+            else if (c == 1) val = img->pixels[i].g;
+            else val = img->pixels[i].b;
+
+            if (val < min_val) min_val = val;
+            if (val > max_val) max_val = val;
+        }
+
+        int range = max_val - min_val;
+        if (range == 0) continue;
+
+        int mid = (max_val + min_val) / 2;
+        int new_min = mid - (int)((mid - min_val) * factor);
+        int new_max = mid + (int)((max_val - mid) * factor);
+
+        // clamp
+        if (new_min < 0) new_min = 0;
+        if (new_max > 255) new_max = 255;
+        int new_range = new_max - new_min;
+        if (new_range == 0) continue;
+
+        for (int i = 0; i < img->width * img->height; i++) {
+            unsigned char* target;
+            if (c == 0) target = &img->pixels[i].r;
+            else if (c == 1) target = &img->pixels[i].g;
+            else target = &img->pixels[i].b;
+
+            int stretched = (*target - new_min) * 255 / new_range;
+            if (stretched < 0) stretched = 0;
+            if (stretched > 255) stretched = 255;
+            *target = (unsigned char)stretched;
+        }
+    }
+}
+
+
 Matrix grab_img_to_mat(Image* img, int x, int y, int size_x, int size_y) {
     Matrix result;
     result.values = NULL;

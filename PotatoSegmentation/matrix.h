@@ -31,6 +31,8 @@ Matrix mat_add(Matrix* mat1, Matrix* mat2);
 
 Matrix mat_sub(Matrix* mat1, Matrix* mat2);
 
+Matrix mat_mul_num(Matrix* mat, float num);
+
 Matrix mat_dot(Matrix* mat1, Matrix* mat2);
 
 float mat_elemwise_dot_sum(Matrix* a, Matrix* b);
