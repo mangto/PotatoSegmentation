@@ -6,9 +6,36 @@
 #include <string.h>
 #include <time.h>
 
+#include "utils.h"
 #include "image.h"
 #include "selective_search.h"
 #include "disjoint_set.h"
+
+
+void draw_rectangle(Pixel* data, int width, int height, BoundingBox box, Pixel color) {
+    for (int x = box.min_x; x <= box.max_x; x++) {
+        if (x >= 0 && x < width) {
+            if (box.min_y >= 0 && box.min_y < height) data[box.min_y * width + x] = color;
+            if (box.max_y >= 0 && box.max_y < height) data[box.max_y * width + x] = color;
+        }
+    }
+    for (int y = box.min_y; y <= box.max_y; y++) {
+        if (y >= 0 && y < height) {
+            if (box.min_x >= 0 && box.min_x < width) data[y * width + box.min_x] = color;
+            if (box.max_x >= 0 && box.max_x < width) data[y * width + box.max_x] = color;
+        }
+    }
+}
+
+void visualize_bounding_boxes(Image* img, BoundingBoxList* bbl, const char* filename) {
+    Image vis_img = copy_image(img);
+    Pixel color = { 255, 0, 0 }; // Red
+    for (int i = 0; i < bbl->count; i++) {
+        draw_rectangle(vis_img.pixels, vis_img.width, vis_img.height, bbl->boxes[i], color);
+    }
+    save_bmp(filename, vis_img.pixels, vis_img.width, vis_img.height);
+    free(vis_img.pixels);
+}
 
 void save_bmp(const char* filename, Pixel* data, int width, int height) {
     FILE* f = fopen(filename, "wb");

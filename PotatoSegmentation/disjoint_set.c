@@ -10,6 +10,14 @@ void ds_init(DisjointSet* ds, int n) {
     ds->count = n;
     ds->parent = malloc(sizeof(int) * n);
     ds->size = malloc(sizeof(int) * n);
+
+    if (ds->parent == NULL || ds->size == NULL) {
+        fprintf(stderr, "FATAL ERROR: Memory allocation failed in ds_init for %d elements.\n", n);
+        free(ds->parent);
+        free(ds->size);
+        exit(EXIT_FAILURE); // Using exit because this is a fatal error
+    }
+
     for (int i = 0; i < n; i++) {
         ds->parent[i] = i;
         ds->size[i] = 1;

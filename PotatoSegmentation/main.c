@@ -5,35 +5,48 @@
 #include "gbs.h"
 #include "selective_search.h"
 #include "utils.h"
-#include "test.h"
 
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 int main() {
+    // 1. Load the original image.
+    Image original_img;
+    if (!load_image(&original_img, "test2.jpg")) { return -1; }
+    printf("Image loaded successfully.\n");
 
-    Image img;
-    DisjointSet ds;
+    // 2. Generate proposals for each color space.
+    BoundingBoxList proposals_rgb = run_selective_search_pipeline(&original_img, COLOR_SPACE_RGB, 500.0f, 2.0f, 0.5f);
+    BoundingBoxList proposals_lab = run_selective_search_pipeline(&original_img, COLOR_SPACE_LAB_L_CHANNEL, 500.0f, 2.0f, 0.5f);
 
-    load_image(&img, "test2.jpg");
+    // 3. Combine all proposals into a single list.
+    BoundingBoxList all_proposals;
+    init_bbox_list(&all_proposals);
+    for (int i = 0; i < proposals_rgb.count; i++) add_bbox(&all_proposals, proposals_rgb.boxes[i]);
+    for (int i = 0; i < proposals_lab.count; i++) add_bbox(&all_proposals, proposals_lab.boxes[i]);
+    printf("\nTotal raw proposals from all colorspaces: %d\n", all_proposals.count);
 
-    //contrast_stretch(&img, 0.8);
+    // 4. Apply post-processing filters to the combined list.
+    non_maximum_suppression(&all_proposals, 0.5f);
+    printf("Filtered to %d proposals after NMS.\n", all_proposals.count);
 
-    graph_based_segmentation(&ds, &img, 400.0f, 2.0f);
+    filter_nested_boxes(&all_proposals);
+    printf("Filtered to %d proposals after removing nested boxes.\n", all_proposals.count);
 
-    visualize_labels(&ds, "test_bf_ssm.bmp", img.width, img.height);
+    filter_proposals_by_geometry(&all_proposals, original_img.width, original_img.height);
+    printf("Filtered to %d proposals after geometry filtering.\n", all_proposals.count);
 
-    RegionList rl = create_regions(&img, &ds);
+    // 5. Visualize the final proposals.
+    visualize_bounding_boxes(&original_img, &all_proposals, "proposals_combined_final.bmp");
+    printf("\nFinal combined proposals visualized in 'proposals_combined_final.bmp'.\n");
 
-    //selective_search_merge(&rl, &ds, 0.8f, 3000, 50.0f);
-    
-    selective_search_merge_multi_stage(&rl, &ds, 0.9f, 0.2f, 0.1f, 1000, 80.0f);
-    
-    visualize_labels(&ds, "test_af_ssm.bmp", img.width, img.height);
+    // 6. Free all allocated resources.
+    free(original_img.pixels);
+    free_bbox_list(&proposals_rgb);
+    free_bbox_list(&proposals_lab);
+    free_bbox_list(&all_proposals);
 
-    free_image(&img);
-    ds_free(&ds);
-    rl_free(&rl);
-
-
+    printf("\nProcess finished successfully.\n");
     return 0;
 }

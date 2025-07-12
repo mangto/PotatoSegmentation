@@ -211,3 +211,95 @@ Matrix create_gaussian_kernel(int size, float sigma) {
 
     return kernel;
 }
+
+HSV rgb_to_hsv(Pixel p) {
+    HSV hsv;
+    float r = p.r / 255.0f;
+    float g = p.g / 255.0f;
+    float b = p.b / 255.0f;
+
+    float cmax = fmaxf(r, fmaxf(g, b));
+    float cmin = fminf(r, fminf(g, b));
+    float delta = cmax - cmin;
+
+    if (delta == 0) {
+        hsv.h = 0;
+    }
+    else if (cmax == r) {
+        hsv.h = 60 * fmodf(((g - b) / delta), 6);
+    }
+    else if (cmax == g) {
+        hsv.h = 60 * (((b - r) / delta) + 2);
+    }
+    else {
+        hsv.h = 60 * (((r - g) / delta) + 4);
+    }
+    if (hsv.h < 0) {
+        hsv.h += 360;
+    }
+
+    hsv.s = (cmax == 0) ? 0 : (delta / cmax);
+
+    hsv.v = cmax;
+
+    return hsv;
+}
+
+void convert_image_to_hsv(Image* src, Image* dst) {
+    dst->width = src->width;
+    dst->height = src->height;
+    dst->channels = src->channels;
+    dst->pixels = (Pixel*)malloc(sizeof(Pixel) * src->width * src->height);
+
+    for (int i = 0; i < src->width * src->height; i++) {
+        HSV hsv = rgb_to_hsv(src->pixels[i]);
+
+        dst->pixels[i].r = (int)(hsv.h / 360.0f * 255.0f); // H(0-360) -> 0-255
+        dst->pixels[i].g = (int)(hsv.s * 255.0f);          // S(0-1) -> 0-255
+        dst->pixels[i].b = (int)(hsv.v * 255.0f);          // V(0-1) -> 0-255
+    }
+}
+
+Lab rgb_to_lab(Pixel p) {
+    float r_linear = p.r / 255.0f;
+    float g_linear = p.g / 255.0f;
+    float b_linear = p.b / 255.0f;
+
+    r_linear = (r_linear > 0.04045f) ? powf((r_linear + 0.055f) / 1.055f, 2.4f) : (r_linear / 12.92f);
+    g_linear = (g_linear > 0.04045f) ? powf((g_linear + 0.055f) / 1.055f, 2.4f) : (g_linear / 12.92f);
+    b_linear = (b_linear > 0.04045f) ? powf((b_linear + 0.055f) / 1.055f, 2.4f) : (b_linear / 12.92f);
+
+    float x = r_linear * 0.4124f + g_linear * 0.3576f + b_linear * 0.1805f;
+    float y = r_linear * 0.2126f + g_linear * 0.7152f + b_linear * 0.0722f;
+    float z = r_linear * 0.0193f + g_linear * 0.1192f + b_linear * 0.9505f;
+
+    x /= 0.95047f;
+    y /= 1.00000f;
+    z /= 1.08883f;
+
+    x = (x > 0.008856f) ? cbrtf(x) : (7.787f * x + 16.0f / 116.0f);
+    y = (y > 0.008856f) ? cbrtf(y) : (7.787f * y + 16.0f / 116.0f);
+    z = (z > 0.008856f) ? cbrtf(z) : (7.787f * z + 16.0f / 116.0f);
+
+    Lab lab;
+    lab.l = (116.0f * y) - 16.0f;
+    lab.a = 500.0f * (x - y);
+    lab.b = 200.0f * (y - z);
+
+    return lab;
+}
+
+void convert_image_to_lab(Image* src, Image* dst) {
+    dst->width = src->width;
+    dst->height = src->height;
+    dst->channels = src->channels;
+    dst->pixels = (Pixel*)malloc(sizeof(Pixel) * src->width * src->height);
+
+    for (int i = 0; i < src->width * src->height; i++) {
+        Lab lab = rgb_to_lab(src->pixels[i]);
+
+        dst->pixels[i].r = (int)(lab.l * 2.55f);      // L*(0-100) -> 0-255
+        dst->pixels[i].g = (int)(lab.a + 128.0f);    // a*(-128-127) -> 0-255
+        dst->pixels[i].b = (int)(lab.b + 128.0f);    // b*(-128-127) -> 0-255
+    }
+}

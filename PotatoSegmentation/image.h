@@ -23,6 +23,16 @@ typedef struct {
 	Pixel* pixels;
 } Image;
 
+typedef struct {
+	float h, s, v;
+} HSV;
+
+typedef struct {
+	float l, a, b;
+} Lab;
+
+Image copy_image(Image* src);
+
 int _load_image_raw(RawImage* img, const char* FilePath);
 
 int load_image(Image* img, const char* FilePath);

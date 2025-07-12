@@ -1,0 +1,2490 @@
+```disjoint_set.c
+#include "disjoint_set.h"
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <assert.h>
+
+void ds_init(DisjointSet* ds, int n) {
+    assert(ds != NULL);
+
+    ds->count = n;
+    ds->parent = malloc(sizeof(int) * n);
+    ds->size = malloc(sizeof(int) * n);
+
+    if (ds->parent == NULL || ds->size == NULL) {
+        fprintf(stderr, "FATAL ERROR: Memory allocation failed in ds_init for %d elements.\n", n);
+        free(ds->parent);
+        free(ds->size);
+        exit(EXIT_FAILURE); // 더 진행하는 것은 의미 없으므로 프로그램 종료
+    }
+
+    for (int i = 0; i < n; i++) {
+        ds->parent[i] = i;
+        ds->size[i] = 1;
+    }
+}
+
+
+int ds_find(DisjointSet* ds, int x) {
+    if (ds->parent[x] != x) {
+        ds->parent[x] = ds_find(ds, ds->parent[x]);  // path compression
+    }
+    return ds->parent[x];
+}
+
+void ds_union(DisjointSet* ds, int x, int y) {
+    int rx = ds_find(ds, x);
+    int ry = ds_find(ds, y);
+    if (rx == ry) return;  // already in same set
+
+    if (ds->size[rx] < ds->size[ry]) {
+        ds->parent[rx] = ry;
+        ds->size[ry] += ds->size[rx];
+    }
+    else {
+        ds->parent[ry] = rx;
+        ds->size[rx] += ds->size[ry];
+    }
+}
+
+void ds_free(DisjointSet* ds) {
+    free(ds->parent);
+    free(ds->size);
+}
+```
+```disjoint_set.h
+#ifndef __DISJOINT_SET_H__
+#define __DISJOINT_SET_H__
+
+typedef struct {
+	int* parent;
+	int* size;
+	int count;
+} DisjointSet;
+
+void ds_init(DisjointSet* ds, int n);
+
+int ds_find(DisjointSet* ds, int x);
+
+void ds_union(DisjointSet* ds, int x, int y);
+
+void ds_free(DisjointSet* ds);
+
+#endif // !__DISJOINT_SET_H__
+
+```
+```gbs.c
+#include "image.h"
+#include "image_process.h"
+#include "gbs.h"
+#include "disjoint_set.h"
+#include "utils.h"
+#include "matrix.h"
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <math.h>
+
+float pixel_distance(Pixel a, Pixel b) {
+
+	float distance;
+
+	distance = sqrt(
+		pow(a.r - b.r, 2) + pow(a.g - b.g, 2) + pow(a.b - b.b, 2)
+	);
+
+	return distance;
+}
+
+void init_edge_list(EdgeList* list, int capacity) {
+	list->data = (Edge*)malloc(sizeof(Edge) * capacity);
+	if (list->data == NULL) {
+		fprintf(stderr, "malloc failed in init_edge_list\n");
+		exit(EXIT_FAILURE);
+	}
+	list->size = 0;
+	list->capacity = capacity;
+}
+
+
+void add_edge(EdgeList* list, int start, int end, float weight) {
+	if (list == NULL) {
+		fprintf(stderr, "Error: list is NULL in add_edge()\n");
+		exit(EXIT_FAILURE);
+	}
+
+	if (list->data == NULL) {
+		fprintf(stderr, "Error: list->data is NULL in add_edge()\n");
+		exit(EXIT_FAILURE);
+	}
+
+	if (list->size >= list->capacity) {
+		list->capacity *= 2;
+		Edge* new_data = (Edge*)realloc(list->data, sizeof(Edge) * list->capacity);
+		if (new_data == NULL) {
+			fprintf(stderr, "Error: realloc failed in add_edge()\n");
+			exit(EXIT_FAILURE);
+		}
+		list->data = new_data;
+	}
+
+	list->data[list->size++] = (Edge){ start, end, weight };
+}
+
+void build_edge_graph(Image* img, EdgeList* edges) {
+	const int dx[8] = {-1, 0, 1, -1, 1, -1, 0, 1};
+	const int dy[8] = {-1, -1, -1, 0, 0, 1, 1, 1};
+
+	int width = img->width;
+	int height = img->height;
+
+	int idx, nx, ny, nidx;
+	float weight;
+	Pixel origin, neighbor;
+
+	// loop for every pixel
+	for (int y = 0; y < height; y++) {
+		for (int x = 0; x < width; x++) {
+			idx = y * width + x;
+			origin = img->pixels[idx];
+
+			for (int i = 0; i < 8; i++) {
+				nx = x + dx[i];
+				ny = y + dy[i];
+
+				// only when pixel exists
+				if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
+					nidx = ny * width + nx;
+					neighbor = img->pixels[nidx];
+					weight = pixel_distance(origin, neighbor);
+					add_edge(edges, idx, nidx, weight);
+				}
+
+			}
+		}
+	}
+
+}
+
+void print_edge_list(const EdgeList* list, int count) {
+	/*
+	Print edge list for debugging
+	if cout == -1 -> see all
+	*/
+
+
+	if (count == -1 || count >= list->size ) { count = list->size; }
+
+	printf("=== Edge List ===\n");
+	for (int i = 0; i < count; i++) {
+		const Edge e = list->data[i];
+		printf("[%d]  src=%d  dst=%d  weight=%.6f\n", i, e.start, e.end, e.weight);
+	}
+	printf("Total edges: %d\n", list->size);
+}
+
+void free_edges(EdgeList* edges) {
+	free(edges->data);
+}
+
+int compare_edge_weight(const void* a, const void* b) {
+	const Edge* ea = (const Edge*)a;
+	const Edge* eb = (const Edge*)b;
+	if (ea->weight < eb->weight) return -1;
+	else if (ea->weight > eb->weight) return 1;
+	else return 0;
+}
+
+void sort_edge_list(EdgeList* list) {
+	// sort edges using qsort
+	qsort(list->data, list->size, sizeof(Edge), compare_edge_weight);
+}
+
+void merge_components(EdgeList* edges, DisjointSet* ds, int* size, float* internal, float k) {
+	for (int i = 0; i < edges->size; i++) {
+		Edge e = edges->data[i];
+
+		int a = ds_find(ds, e.start);
+		int b = ds_find(ds, e.end);
+
+		if (a == b) continue;
+
+		float threshold_a = k / size[a];
+		float threshold_b = k / size[b];
+
+		float diff_a = internal[a];
+		float diff_b = internal[b];
+
+		float threshold = fminf(diff_a + threshold_a, diff_b + threshold_b);
+
+		if (e.weight <= threshold) {
+			ds_union(ds, a, b);
+			int new_root = ds_find(ds, a);
+
+			size[new_root] = size[a] + size[b];
+			internal[new_root] = fmaxf(e.weight, fmaxf(diff_a, diff_b));
+		}
+	}
+}
+
+
+void graph_based_segmentation(DisjointSet* ds, Image* img, float k, float sigma) {
+	
+	EdgeList edges;
+	Matrix gaussian;
+
+	int pixel_count = img->width*img->height;
+	int* size = malloc(sizeof(int) * pixel_count);
+	float* internal = malloc(sizeof(float) * pixel_count);
+
+	int kernel_size = 5;
+	if (kernel_size % 2 == 0) {
+		printf("Caution: Automaticaaly change kernel size: %d -> %d\n", kernel_size, ++kernel_size);
+	}
+
+	gaussian = create_gaussian_kernel(kernel_size, sigma);
+
+	apply_kernel(img, &gaussian);
+
+	//contrast_stretch(img, 0.5);
+
+	for (int i = 0; i < pixel_count; i++) {
+		size[i] = 1;
+		internal[i] = 0.0f;
+	}
+
+	init_edge_list(&edges, 100);
+
+	build_edge_graph(img, &edges);
+	
+	sort_edge_list(&edges);
+
+	ds_init(ds, img->width * img->height);
+
+	merge_components(&edges, ds, size, internal, k);
+
+	free_edges(&edges);
+	free_matrix(&gaussian);
+	free(size);
+	free(internal);
+}
+
+// 1채널(흑백) 이미지에 대한 거리 계산
+float pixel_distance_gray(Pixel a, Pixel b) {
+	// r 채널만 사용하여 밝기 값의 차이를 계산
+	return fabsf((float)a.r - (float)b.r);
+}
+
+// 1채널 이미지에 대한 에지 그래프 생성
+void build_edge_graph_gray(Image* img, EdgeList* edges) {
+	const int dx[4] = { 1, 0, 1, 1 }; // 8방향이 아닌 4방향만 봐도 충분
+	const int dy[4] = { 0, 1, -1, 1 };
+
+	int width = img->width;
+	int height = img->height;
+
+	for (int y = 0; y < height; y++) {
+		for (int x = 0; x < width; x++) {
+			int idx1 = y * width + x;
+			for (int i = 0; i < 4; i++) {
+				int nx = x + dx[i];
+				int ny = y + dy[i];
+				if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
+					int idx2 = ny * width + nx;
+					float weight = pixel_distance_gray(img->pixels[idx1], img->pixels[idx2]);
+					add_edge(edges, idx1, idx2, weight);
+				}
+			}
+		}
+	}
+}
+
+// 1채널(흑백) 이미지용 Graph-Based Segmentation
+void graph_based_segmentation_grayscale(DisjointSet* ds, Image* img, float k) {
+	EdgeList edges;
+	int pixel_count = img->width * img->height;
+	int* size = malloc(sizeof(int) * pixel_count);
+	float* internal = malloc(sizeof(float) * pixel_count);
+
+	for (int i = 0; i < pixel_count; i++) {
+		size[i] = 1;
+		internal[i] = 0.0f;
+	}
+
+	init_edge_list(&edges, pixel_count * 2); // 에지 개수를 예상하여 초기화
+	build_edge_graph_gray(img, &edges);
+	sort_edge_list(&edges);
+	ds_init(ds, pixel_count);
+
+	// merge_components는 그대로 재사용 (로직이 동일함)
+	merge_components(&edges, ds, size, internal, k);
+
+	free_edges(&edges);
+	free(size);
+	free(internal);
+}
+```
+```gbs.h
+#ifndef __GBS__
+#define __GBS__
+
+#include "image.h"
+#include "disjoint_set.h"
+#include "selective_search.h"
+
+#include <stdio.h>
+
+typedef struct {
+	int start;
+	int end;
+	float weight;
+} Edge;
+
+typedef struct {
+	Edge* data;
+	int size;
+	int capacity;
+} EdgeList;
+
+float pixel_distance(Pixel a, Pixel b);
+
+void init_edge_list(EdgeList* list, int capacity);
+
+void add_edge(EdgeList* list, int start, int end, float weight);
+
+void build_edge_graph(Image* img, EdgeList* edges);
+
+void free_edges(EdgeList* edges);
+
+void print_edge_list(const EdgeList* list, int count);
+
+int compare_edge_weight(const void* a, const void* b);
+
+void sort_edge_list(EdgeList* list);
+
+void merge_components(EdgeList* edges, DisjointSet* ds, int* size, float* internal, float k);
+
+void graph_based_segmentation(DisjointSet* ds, Image* img, float k, float sigma);
+
+void graph_based_segmentation_grayscale(DisjointSet* ds, Image* img, float k);
+
+void enforce_min_region_size(RegionList* rl, DisjointSet* ds, int min_size);
+
+#endif // !__GBS__
+
+```
+```image.c
+#define STB_IMAGE_IMPLEMENTATION
+#include "image.h"
+#include "stb_image.h"
+#include <stdio.h>
+#include <string.h> 
+
+Image copy_image(Image* src) {
+    Image dst;
+    dst.width = src->width;
+    dst.height = src->height;
+    dst.channels = src->channels;
+
+    int image_size = src->width * src->height;
+    dst.pixels = (Pixel*)malloc(sizeof(Pixel) * image_size);
+
+    if (dst.pixels != NULL) {
+        memcpy(dst.pixels, src->pixels, sizeof(Pixel) * image_size);
+    }
+    return dst;
+}
+
+// Get pixel with cord
+Pixel get_pixel(Image* img, int x, int y) {
+    return img->pixels[y * img->width + x];
+}
+
+// Set pixel with cord
+void set_pixel(Image* img, int x, int y, Pixel p) {
+    img->pixels[y * img->width + x] = p;
+}
+
+static int _load_image_raw(RawImage* img, const char* FilePath) {
+    /* Load Image as (r g b r g b ...) */
+
+    img->pixels = stbi_load(FilePath, &img->width, &img->height, &img->channels, 0);
+
+    if (img->pixels == NULL) {
+        printf("'%s' Failed To Load Image!\n", FilePath);
+        return 0;
+    }
+
+    return 1;
+
+}
+
+int load_image(Image* img, const char* FilePath) {
+    /* Load Image */
+
+    RawImage raw;
+    int ImageSize;
+
+    _load_image_raw(&raw, FilePath); // (r g b r g b ...)
+    
+    ImageSize = raw.width * raw.height;
+
+    img->width = raw.width;
+    img->height = raw.height;
+    img->channels = raw.channels;
+    img->pixels = (Pixel*) malloc(sizeof(Pixel) * ImageSize);
+
+    if (img->pixels == NULL) {
+        // Handle memory allocation failure
+        free(raw.pixels); // Free the raw pixel data to prevent leak
+        return 0;
+    }
+
+    for (int i = 0; i < ImageSize; i++) {
+        img->pixels[i].r = raw.pixels[3 * i];
+        img->pixels[i].g = raw.pixels[3 * i + 1];
+        img->pixels[i].b = raw.pixels[3 * i + 2];
+    }
+
+    free(raw.pixels);
+
+    return 1;
+}
+
+
+void free_image(Image* img) {
+    if (img != NULL && img->pixels != NULL) {
+        stbi_image_free(img->pixels);
+        img->pixels = NULL;
+    }
+}
+
+char* pixel_to_string(Pixel pixel) {
+    static char str_buffer[20];
+    snprintf(str_buffer, sizeof(str_buffer), "(%d, %d, %d)", pixel.r, pixel.g, pixel.b);
+
+    return str_buffer;
+}
+```
+```image.h
+#ifndef __IMAGE_H_
+#define __IMAGE_H_
+
+#include <stdio.h>
+
+typedef struct {
+	int width;
+	int height;
+	int channels;
+	unsigned char* pixels;
+} RawImage;
+
+typedef struct {
+	int r;
+	int g;
+	int b;
+} Pixel;
+
+typedef struct {
+	int width;
+	int height;
+	int channels;
+	Pixel* pixels;
+} Image;
+
+typedef struct {
+	float h, s, v;
+} HSV;
+
+typedef struct {
+	float l, a, b;
+} Lab;
+
+Image copy_image(Image* src);
+
+int _load_image_raw(RawImage* img, const char* FilePath);
+
+int load_image(Image* img, const char* FilePath);
+
+void free_image(Image* image);
+
+char* pixel_to_string(Pixel pixel);
+
+
+
+#endif // !__IMAGE_H_
+```
+```image_process.c
+#include "image.h"
+#include "matrix.h"
+#include "image_process.h"
+
+#include <stdio.h>
+#include <math.h>
+#include <stdlib.h>
+#include <assert.h>
+
+void contrast_stretch(Image* img, float factor) {
+    if (factor <= 0.0f) return;
+
+    for (int c = 0; c < 3; c++) {
+        int min_val = 255, max_val = 0;
+
+        for (int i = 0; i < img->width * img->height; i++) {
+            unsigned char val;
+            if (c == 0) val = img->pixels[i].r;
+            else if (c == 1) val = img->pixels[i].g;
+            else val = img->pixels[i].b;
+
+            if (val < min_val) min_val = val;
+            if (val > max_val) max_val = val;
+        }
+
+        int range = max_val - min_val;
+        if (range == 0) continue;
+
+        int mid = (max_val + min_val) / 2;
+        int new_min = mid - (int)((mid - min_val) * factor);
+        int new_max = mid + (int)((max_val - mid) * factor);
+
+        // clamp
+        if (new_min < 0) new_min = 0;
+        if (new_max > 255) new_max = 255;
+        int new_range = new_max - new_min;
+        if (new_range == 0) continue;
+
+        for (int i = 0; i < img->width * img->height; i++) {
+            unsigned char* target;
+            if (c == 0) target = &img->pixels[i].r;
+            else if (c == 1) target = &img->pixels[i].g;
+            else target = &img->pixels[i].b;
+
+            int stretched = (*target - new_min) * 255 / new_range;
+            if (stretched < 0) stretched = 0;
+            if (stretched > 255) stretched = 255;
+            *target = (unsigned char)stretched;
+        }
+    }
+}
+
+
+Matrix grab_img_to_mat(Image* img, int x, int y, int size_x, int size_y) {
+    Matrix result;
+    result.values = NULL;
+    result.shape = NULL;
+
+    int mat_size_2d = size_x * size_y;
+    int x_half = size_x / 2;
+    int y_half = size_y / 2;
+
+    result.dims = 3;
+    result.shape = malloc(sizeof(int) * result.dims);
+    if (!result.shape) {
+        fprintf(stderr, "Error: shape allocation failed.\n");
+        return result; 
+    }
+    result.shape[0] = size_y;
+    result.shape[1] = size_x;
+    result.shape[2] = img->channels;
+
+    result.values = malloc(sizeof(float) * mat_size_2d * img->channels);
+    if (!result.values) {
+        fprintf(stderr, "Error: values allocation failed.\n");
+        free(result.shape);
+        result.shape = NULL;
+        return result;
+    }
+
+    for (int dy = 0; dy < size_y; dy++) {
+        for (int dx = 0; dx < size_x; dx++) {
+            int src_x = x + dx - x_half;
+            int src_y = y + dy - y_half;
+            int src_idx = src_y * img->width + src_x;
+
+            int dst_idx = dy * size_x + dx;
+
+            result.values[dst_idx] = img->pixels[src_idx].r;
+            result.values[dst_idx + mat_size_2d] = img->pixels[src_idx].g;
+            result.values[dst_idx + mat_size_2d * 2] = img->pixels[src_idx].b;
+        }
+    }
+
+    result.get = mat_get;
+    result.set = mat_set;
+    return result;
+}
+
+void grab_rgb(Matrix* img_mat, int* r, int* g, int* b) {
+
+	if (img_mat == NULL || img_mat->shape == NULL || img_mat->dims < 2) {
+		fprintf(stderr, "Invalid matrix provided to grab_rgb.\n");
+		return;
+	}
+	int mat_size = img_mat->shape[0] * img_mat->shape[1];
+	r = malloc(sizeof(int) * mat_size);
+	g = malloc(sizeof(int) * mat_size);
+	b = malloc(sizeof(int) * mat_size);
+
+	if (r == NULL || g == NULL || b == NULL) {
+		fprintf(stderr, "ERROR: Memory allocation failed in grab_rgb.\n");
+		free(&r);
+		free(&g);
+		free(&b);
+		return;
+	}
+
+	for (int i = 0; i < mat_size; i++) {
+		r[i] = img_mat->values[i];
+		g[i] = img_mat->values[mat_size + i];
+		b[i] = img_mat->values[mat_size * 2 + i];
+	}
+}
+
+void apply_kernel(Image* img, Matrix* kernel) {
+    int width = img->width;
+    int height = img->height;
+    int kx = kernel->shape[1];
+    int ky = kernel->shape[0];
+    int kx_half = kx / 2;
+    int ky_half = ky / 2;
+	int idx;
+
+    Pixel* buffer = malloc(sizeof(Pixel) * width * height);
+    if (!buffer) return;
+
+    for (int y = 0; y < height; y++) {
+        for (int x = 0; x < width; x++) {
+			idx = y * width + x;
+
+            if (y < ky_half || y >= height - ky_half || x < kx_half || x >= width - kx_half) {
+                buffer[idx] = img->pixels[idx];
+                continue;
+            }
+            Matrix patch3D = grab_img_to_mat(img, x, y, kx, ky);
+            if (patch3D.values == NULL) continue;
+
+            int patch_size_2d = kx * ky;
+
+            Matrix r_mat, g_mat, b_mat;
+            init_matrix(&r_mat, patch3D.values, kernel->shape, kernel->dims);
+            init_matrix(&g_mat, patch3D.values + patch_size_2d, kernel->shape, kernel->dims);
+            init_matrix(&b_mat, patch3D.values + patch_size_2d * 2, kernel->shape, kernel->dims);
+
+            float sum_r = mat_elemwise_dot_sum(&r_mat, kernel);
+            float sum_g = mat_elemwise_dot_sum(&g_mat, kernel);
+            float sum_b = mat_elemwise_dot_sum(&b_mat, kernel);
+
+            free_matrix(&patch3D);
+            free(r_mat.shape);
+            free(g_mat.shape);
+            free(b_mat.shape);
+
+            buffer[idx].r = (int)(sum_r > 255 ? 255 : (sum_r < 0 ? 0 : sum_r));
+            buffer[idx].g = (int)(sum_g > 255 ? 255 : (sum_g < 0 ? 0 : sum_g));
+            buffer[idx].b = (int)(sum_b > 255 ? 255 : (sum_b < 0 ? 0 : sum_b));
+        }
+    }
+
+    free(img->pixels);
+    img->pixels = buffer;
+}
+
+Matrix create_gaussian_kernel(int size, float sigma) {
+    assert(size % 2 == 1);
+
+    Matrix kernel;
+    int shape[] = { size, size };
+
+    kernel.dims = 2;
+    kernel.shape = malloc(sizeof(int) * 2);
+    kernel.shape[0] = shape[0];
+    kernel.shape[1] = shape[1];
+
+    kernel.values = malloc(sizeof(float) * size * size);
+
+    kernel.get = mat_get;
+    kernel.set = mat_set;
+
+
+    int center = size / 2;
+    float sum = 0.0f;
+    const float PI = 3.14159265358979323846;
+
+    for (int y = 0; y < size; y++) {
+        for (int x = 0; x < size; x++) {
+            int rel_x = x - center;
+            int rel_y = y - center;
+
+            float value = (1.0f / (2.0f * PI * sigma * sigma)) * exp(-(rel_x * rel_x + rel_y * rel_y) / (2.0f * sigma * sigma));
+
+            kernel.values[y * size + x] = value;
+            sum += value;
+        }
+    }
+
+    for (int i = 0; i < size * size; i++) {
+        kernel.values[i] /= sum;
+    }
+
+    return kernel;
+}
+
+HSV rgb_to_hsv(Pixel p) {
+    HSV hsv;
+    float r = p.r / 255.0f;
+    float g = p.g / 255.0f;
+    float b = p.b / 255.0f;
+
+    float cmax = fmaxf(r, fmaxf(g, b));
+    float cmin = fminf(r, fminf(g, b));
+    float delta = cmax - cmin;
+
+    if (delta == 0) {
+        hsv.h = 0;
+    }
+    else if (cmax == r) {
+        hsv.h = 60 * fmodf(((g - b) / delta), 6);
+    }
+    else if (cmax == g) {
+        hsv.h = 60 * (((b - r) / delta) + 2);
+    }
+    else {
+        hsv.h = 60 * (((r - g) / delta) + 4);
+    }
+    if (hsv.h < 0) {
+        hsv.h += 360;
+    }
+
+    hsv.s = (cmax == 0) ? 0 : (delta / cmax);
+
+    hsv.v = cmax;
+
+    return hsv;
+}
+
+void convert_image_to_hsv(Image* src, Image* dst) {
+    dst->width = src->width;
+    dst->height = src->height;
+    dst->channels = src->channels;
+    dst->pixels = (Pixel*)malloc(sizeof(Pixel) * src->width * src->height);
+
+    for (int i = 0; i < src->width * src->height; i++) {
+        HSV hsv = rgb_to_hsv(src->pixels[i]);
+
+        dst->pixels[i].r = (int)(hsv.h / 360.0f * 255.0f); // H(0-360) -> 0-255
+        dst->pixels[i].g = (int)(hsv.s * 255.0f);          // S(0-1) -> 0-255
+        dst->pixels[i].b = (int)(hsv.v * 255.0f);          // V(0-1) -> 0-255
+    }
+}
+
+Lab rgb_to_lab(Pixel p) {
+    float r_linear = p.r / 255.0f;
+    float g_linear = p.g / 255.0f;
+    float b_linear = p.b / 255.0f;
+
+    r_linear = (r_linear > 0.04045f) ? powf((r_linear + 0.055f) / 1.055f, 2.4f) : (r_linear / 12.92f);
+    g_linear = (g_linear > 0.04045f) ? powf((g_linear + 0.055f) / 1.055f, 2.4f) : (g_linear / 12.92f);
+    b_linear = (b_linear > 0.04045f) ? powf((b_linear + 0.055f) / 1.055f, 2.4f) : (b_linear / 12.92f);
+
+    float x = r_linear * 0.4124f + g_linear * 0.3576f + b_linear * 0.1805f;
+    float y = r_linear * 0.2126f + g_linear * 0.7152f + b_linear * 0.0722f;
+    float z = r_linear * 0.0193f + g_linear * 0.1192f + b_linear * 0.9505f;
+
+    x /= 0.95047f;
+    y /= 1.00000f;
+    z /= 1.08883f;
+
+    x = (x > 0.008856f) ? cbrtf(x) : (7.787f * x + 16.0f / 116.0f);
+    y = (y > 0.008856f) ? cbrtf(y) : (7.787f * y + 16.0f / 116.0f);
+    z = (z > 0.008856f) ? cbrtf(z) : (7.787f * z + 16.0f / 116.0f);
+
+    Lab lab;
+    lab.l = (116.0f * y) - 16.0f;
+    lab.a = 500.0f * (x - y);
+    lab.b = 200.0f * (y - z);
+
+    return lab;
+}
+
+void convert_image_to_lab(Image* src, Image* dst) {
+    dst->width = src->width;
+    dst->height = src->height;
+    dst->channels = src->channels;
+    dst->pixels = (Pixel*)malloc(sizeof(Pixel) * src->width * src->height);
+
+    for (int i = 0; i < src->width * src->height; i++) {
+        Lab lab = rgb_to_lab(src->pixels[i]);
+
+        dst->pixels[i].r = (int)(lab.l * 2.55f);      // L*(0-100) -> 0-255
+        dst->pixels[i].g = (int)(lab.a + 128.0f);    // a*(-128-127) -> 0-255
+        dst->pixels[i].b = (int)(lab.b + 128.0f);    // b*(-128-127) -> 0-255
+    }
+}
+```
+```image_process.h
+#ifndef __IMAGE__PROCESS_H__
+#define __IMAGE__PROCESS_H__
+
+#include "image.h"
+#include "matrix.h"
+
+#include <stdio.h>
+
+void contrast_stretch(Image* img, float factor);
+
+Matrix grab_img_to_mat(Image* img, int x, int y, int size_x, int size_y);
+
+void grab_rgb(Matrix* img_mat, int* r, int* g, int* b);
+
+void apply_kernel(Image* img, Matrix* kernel);
+
+Matrix create_gaussian_kernel(int size, float sigma);
+
+HSV rgb_to_hsv(Pixel p);
+void convert_image_to_hsv(Image* src, Image* dst);
+
+Lab rgb_to_lab(Pixel p);
+void convert_image_to_lab(Image* src, Image* dst);
+
+#endif // !__IMAGE__PROCESS_H__
+
+```
+```main.c
+#include "stb_image.h"
+#include "image.h"
+#include "image_process.h"
+#include "matrix.h"
+#include "gbs.h"
+#include "selective_search.h"
+#include "utils.h"
+#include "test.h"
+
+#include <stdio.h>
+#include <stdlib.h>
+
+int main() {
+    // 1. 원본 이미지 로드
+    Image original_img;
+    if (!load_image(&original_img, "test.jpg")) {
+        fprintf(stderr, "Error: Failed to load image.\n");
+        return -1;
+    }
+    printf("Image loaded successfully.\n");
+
+    // 2. Lab 색상 공간으로 변환 준비
+    Image lab_base = copy_image(&original_img);
+    if (!lab_base.pixels) {
+        fprintf(stderr, "Error: Failed to copy image.\n");
+        free(original_img.pixels);
+        return -1;
+    }
+
+    Image img_lab;
+    convert_image_to_lab(&lab_base, &img_lab);
+    if (!img_lab.pixels) {
+        fprintf(stderr, "Error: Failed to convert image to Lab.\n");
+        free(original_img.pixels);
+        free(lab_base.pixels);
+        return -1;
+    }
+    printf("Image converted to Lab color space.\n");
+
+    // 3. L* 채널(밝기)만 추출하여 흑백 이미지 생성
+    Image img_l_channel;
+    img_l_channel.width = img_lab.width;
+    img_l_channel.height = img_lab.height;
+    img_l_channel.channels = 1;
+    img_l_channel.pixels = (Pixel*)malloc(sizeof(Pixel) * img_l_channel.width * img_l_channel.height);
+    if (!img_l_channel.pixels) {
+        fprintf(stderr, "Error: Failed to create L* channel image.\n");
+        free(original_img.pixels);
+        free(lab_base.pixels);
+        free(img_lab.pixels);
+        return -1;
+    }
+    for (int i = 0; i < img_l_channel.width * img_l_channel.height; i++) {
+        img_l_channel.pixels[i].r = img_lab.pixels[i].r;
+    }
+    printf("L* channel extracted for segmentation.\n");
+
+    // 4. L* 채널 이미지로 초기 분할 (Graph-Based Segmentation)
+    DisjointSet ds_lab;
+    graph_based_segmentation_grayscale(&ds_lab, &img_l_channel, 500.0f); // k값을 500으로 상향 조정
+    printf("Initial segmentation complete.\n");
+
+    // 5. 초기 영역 리스트 생성 (분할은 L*로, 특징은 Lab 컬러로)
+    RegionList rl_lab = create_regions(&img_lab, &ds_lab);
+    printf("Lab Before merge: %d active regions\n", count_active_regions(&rl_lab));
+
+    // 6. 모든 후보 경계 상자(Bounding Box) 생성 (Selective Search)
+    BoundingBoxList proposals;
+    init_bbox_list(&proposals);
+    selective_search_merge(&rl_lab, &ds_lab, &proposals, 10000, 2.0f); // max_merges 상향
+    printf("Generated %d raw proposals.\n", proposals.count);
+
+    // 7. NMS로 중복 후보 1차 제거
+    float iou_threshold = 0.5f;
+    non_maximum_suppression(&proposals, iou_threshold);
+    printf("Filtered to %d proposals after NMS.\n", proposals.count);
+
+    // 8. 완전히 포함된 상자 2차 제거
+    filter_nested_boxes(&proposals);
+    printf("Filtered to %d proposals after removing nested boxes.\n", proposals.count);
+
+    // 9. 기하학적 특징으로 3차 제거
+    filter_proposals_by_geometry(&proposals, original_img.width, original_img.height);
+    printf("Filtered to %d proposals after geometry filtering.\n", proposals.count);
+
+    // 10. 최종 후보들을 원본 이미지 위에 그려서 파일로 저장
+    visualize_bounding_boxes(&original_img, &proposals, "proposals_final.bmp");
+    printf("Final proposals visualized in 'proposals_final.bmp'.\n");
+
+    // --- 11. 모든 리소스 해제 ---
+    free(original_img.pixels);
+    free(lab_base.pixels);
+    free(img_lab.pixels);
+    free(img_l_channel.pixels);
+    ds_free(&ds_lab);
+    rl_free(&rl_lab);
+    free_bbox_list(&proposals);
+
+    printf("\nProcess finished successfully.\n");
+
+    return 0;
+}
+```
+```matrix.c
+#include "matrix.h"
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdarg.h>
+#include <assert.h>
+#include <string.h>
+
+void init_matrix(Matrix* mat, float* values, int* shape, int dims) {
+
+    int total = 1;
+
+    mat->dims = dims;
+    mat->shape = malloc(sizeof(int) * dims);
+
+    for (int i = 0; i < dims; i++) {
+        mat->shape[i] = shape[i];
+        total *= shape[i];
+    }
+
+    mat->values = malloc(sizeof(float) * total);
+
+    for (int i = 0; i < total; i++) {
+        mat->values[i] = values ? values[i] : 0.0f;
+    }
+
+    mat->get = mat_get;
+    mat->set = mat_set;
+
+}
+
+float mat_get(Matrix* mat, ...) {
+    assert(mat && mat->shape && mat->values);
+
+    va_list args;
+    va_start(args, mat);
+
+    int idx = 0;
+    int stride = 1;
+    for (int d = mat->dims - 1; d >= 0; --d) {
+        int i = va_arg(args, int);
+        assert(i >= 0 && i < mat->shape[d]);
+        idx += i * stride;
+        stride *= mat->shape[d];
+    }
+
+    va_end(args);
+
+    int total = 1;
+    for (int i = 0; i < mat->dims; i++) total *= mat->shape[i];
+    assert(idx >= 0 && idx < total);
+
+    //printf("[DEBUG] Accessing mat->values[%d]\n", idx);
+
+    return mat->values[idx];
+}
+
+
+void mat_set(Matrix* mat, float val, ...) {
+    assert(mat && mat->shape && mat->values);
+
+    va_list args;
+    va_start(args, val);
+
+    int idx = 0;
+    int stride = 1;
+
+    for (int d = mat->dims - 1; d >= 0; --d) {
+        int i = va_arg(args, int);
+        idx += i * stride;
+        stride *= mat->shape[d];
+    }
+
+    va_end(args);
+    mat->values[idx] = val;
+}
+
+void free_matrix(Matrix* mat) {
+    free(mat->values);
+    free(mat->shape);
+}
+
+// for debugging
+static void print_matrix_recursive(Matrix* mat, int dim_idx, int* current_indices) {
+    const char* default_format = "%.2f";
+
+    if (dim_idx == mat->dims) {
+        int idx = 0;
+        int stride = 1;
+        for (int d = mat->dims - 1; d >= 0; --d) {
+            idx += current_indices[d] * stride;
+            stride *= mat->shape[d];
+        }
+        printf(default_format, mat->values[idx]);
+        printf(" ");
+    }
+    else {
+        if (dim_idx > 0) {
+            printf("[");
+        }
+        for (int i = 0; i < mat->shape[dim_idx]; ++i) {
+            current_indices[dim_idx] = i;
+            print_matrix_recursive(mat, dim_idx + 1, current_indices);
+        }
+        if (dim_idx > 0) {
+            printf("]");
+            if (dim_idx == 1 && mat->dims > 1) {
+                printf("\n");
+            }
+            else if (dim_idx > 1) {
+                printf(" ");
+            }
+        }
+    }
+}
+
+void print_matrix(Matrix* mat) {
+    assert(mat && mat->values && mat->shape);
+
+    printf("Matrix (dims=%d): ", mat->dims);
+    for (int i = 0; i < mat->dims; ++i) {
+        printf("%d%s", mat->shape[i], i == mat->dims - 1 ? "\n" : " x ");
+    }
+
+    int* current_indices = (int*)malloc(sizeof(int) * mat->dims);
+    if (!current_indices) {
+        fprintf(stderr, "Memory allocation failed for current_indices in print_matrix.\n");
+        return;
+    }
+    const char* default_format = "%.2f";
+
+    if (mat->dims == 0) {
+        printf("[Empty Matrix]\n");
+    }
+    else if (mat->dims == 1) {
+        printf("[");
+        for (int i = 0; i < mat->shape[0]; ++i) {
+            printf(default_format, mat->values[i]);
+            if (i < mat->shape[0] - 1) {
+                printf(" ");
+            }
+        }
+        printf("]\n");
+    }
+    else {
+        print_matrix_recursive(mat, 0, current_indices);
+        printf("\n");
+    }
+
+    free(current_indices);
+}
+
+
+
+int is_same_shape(Matrix* mat1, Matrix* mat2) {
+    if (mat1->dims != mat2->dims) { return 0; }
+
+    for (int i = 0; i < mat1->dims; i++) {
+        if (mat1->shape[i] != mat2->shape[i]) { return 0; }
+    }
+    
+    return 1;
+}
+
+
+
+Matrix mat_add(Matrix* mat1, Matrix* mat2) {
+    assert(is_same_shape(mat1, mat2));
+    
+    Matrix result;
+    int total = 1;
+    
+    for (int i = 0; i < mat1->dims; ++i) total *= mat1->shape[i];
+
+    result.dims = mat1->dims;
+    result.shape = malloc(sizeof(int) * mat1->dims);
+    memcpy(result.shape, mat1->shape, sizeof(int) * mat1->dims);
+
+    result.values = malloc(sizeof(float) * total);
+    for (int i = 0; i < total; ++i) {
+        result.values[i] = mat1->values[i] + mat2->values[i];
+    }
+
+    result.get = mat1->get;
+    result.set = mat1->set;
+
+    return result;
+}
+
+Matrix mat_sub(Matrix* mat1, Matrix* mat2) {
+    assert(is_same_shape(mat1, mat2));
+
+    Matrix result;
+    int total = 1;
+
+    for (int i = 0; i < mat1->dims; ++i) total *= mat1->shape[i];
+
+    result.dims = mat1->dims;
+    result.shape = malloc(sizeof(int) * mat1->dims);
+    memcpy(result.shape, mat1->shape, sizeof(int) * mat1->dims);
+
+    result.values = malloc(sizeof(float) * total);
+    for (int i = 0; i < total; ++i) {
+        result.values[i] = mat1->values[i] - mat2->values[i];
+    }
+
+    result.get = mat1->get;
+    result.set = mat1->set;
+
+    return result;
+    return ;
+}
+
+Matrix mat_dot(Matrix* mat1, Matrix* mat2) {
+    assert(mat1 != NULL && mat1->shape != NULL);
+    assert(mat2 != NULL && mat2->shape != NULL);
+    assert(mat1->dims == 2 && mat2->dims == 2 && "mat_dot currently supports only 2D matrices.");
+
+    int R1 = mat1->shape[0];
+    int C1 = mat1->shape[1];
+    int R2 = mat2->shape[0];
+    int C2 = mat2->shape[1];
+
+    assert(C1 == R2 && "Matrix dimensions for dot product are incompatible (C1 != R2).");
+
+    Matrix result;
+    result.dims = 2;
+    result.shape = (int*)malloc(sizeof(int) * 2);
+    if (!result.shape) {
+        fprintf(stderr, "Memory allocation failed for result.shape in mat_dot.\n");
+        exit(EXIT_FAILURE);
+    }
+    result.shape[0] = R1;
+    result.shape[1] = C2;
+
+    int total_elements = R1 * C2;
+    result.values = (float*)malloc(sizeof(float) * total_elements);
+    if (!result.values) {
+        fprintf(stderr, "Memory allocation failed for result.values in mat_dot.\n");
+        free(result.shape);
+        exit(EXIT_FAILURE);
+    }
+
+    memset(result.values, 0, sizeof(float) * total_elements);
+
+    for (int i = 0; i < R1; ++i) {
+        for (int k = 0; k < C1; ++k) {
+
+            float mat1_ik = mat1->values[i * C1 + k];
+            for (int j = 0; j < C2; ++j) {
+                result.values[i * C2 + j] += mat1_ik * mat2->values[k * C2 + j];
+            }
+        }
+    }
+
+    result.get = mat_get;
+    result.set = mat_set;
+
+    return result;
+}
+
+float mat_elemwise_dot_sum(Matrix* a, Matrix* b) {
+    assert(a != NULL && b != NULL);
+    assert(a->dims == b->dims);
+
+    for (int i = 0; i < a->dims; i++) {
+        assert(a->shape[i] == b->shape[i]);
+    }
+
+    int total = 1;
+    for (int i = 0; i < a->dims; i++) {
+        total *= a->shape[i];
+    }
+
+    float sum = 0.0f;
+    for (int i = 0; i < total; i++) {
+        sum += a->values[i] * b->values[i];
+    }
+
+    return sum;
+}
+```
+```matrix.h
+#ifndef __MATRIX_H__
+#define __MATRIX_H__
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdarg.h>
+#include <assert.h>
+
+typedef struct Matrix {
+    float* values;
+    int* shape;
+    int dims;
+
+    float (*get)(struct Matrix*, ...);
+    void  (*set)(struct Matrix*, float, ...);
+} Matrix;
+
+void init_matrix(Matrix* mat, float* values, int* shape, int dims);
+
+void print_matrix(Matrix* mat);
+
+void free_matrix(Matrix* mat);
+
+float mat_get(Matrix* mat, ...);
+
+void mat_set(Matrix* mat, float val, ...);
+
+int is_same_shape(Matrix* mat1, Matrix* mat2);
+
+Matrix mat_add(Matrix* mat1, Matrix* mat2);
+
+Matrix mat_sub(Matrix* mat1, Matrix* mat2);
+
+Matrix mat_mul_num(Matrix* mat, float num);
+
+Matrix mat_dot(Matrix* mat1, Matrix* mat2);
+
+float mat_elemwise_dot_sum(Matrix* a, Matrix* b);
+
+#endif // !__MATRIX_H__
+
+```
+```selective_search.c
+#include "selective_search.h"
+#include "disjoint_set.h"
+#include "image.h"
+#include "utils.h"
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <math.h>
+#include <string.h>
+
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
+
+typedef struct { float mag; float ori; } GradientPixel;
+static GradientPixel* calculate_gradients(Image* img, int channel);
+
+static inline unsigned char get_pixel_channel(Pixel* p, int channel) {
+	if (channel == 0) return p->r;
+	if (channel == 1) return p->g;
+	return p->b;
+}
+
+void sl_free(SimilarityList* sl) {
+	if (sl && sl->similarities) {
+		free(sl->similarities);
+		sl->similarities = NULL;
+	}
+}
+
+float color_similarity(Region* region1, Region* region2) {
+	float similarity = 0.0f;
+	for (int k = 0; k < 75; k++) {
+		similarity += fminf(region1->color_hist[k], region2->color_hist[k]);
+	}
+	return similarity;
+}
+
+float texture_similarity(Region* region1, Region* region2) {
+	float similarity = 0.0f;
+	for (int k = 0; k < 24; k++) {
+		similarity += fminf(region1->texture_hist[k], region2->texture_hist[k]);
+	}
+	return similarity;
+}
+
+float size_similarity(Region* region1, Region* region2, int img_size) {
+	return 1.0f - (float)(region1->size + region2->size) / (float)img_size;
+}
+
+float fill_similarity(Region* region1, Region* region2, int img_size) {
+	int x_min = min(region1->min_x, region2->min_x);
+	int y_min = min(region1->min_y, region2->min_y);
+	int x_max = max(region1->max_x, region2->max_x);
+	int y_max = max(region1->max_y, region2->max_y);
+
+	int bbox_area = (x_max - x_min + 1) * (y_max - y_min + 1);
+	int total_area = region1->size + region2->size;
+
+	return 1.0f - (float)(bbox_area - total_area) / (float)img_size;
+}
+
+
+void add_similarity(RegionList* rl, SimilarityList* sl, int idx1, int idx2) {
+	if (sl->count >= sl->capacity) {
+		sl->capacity = (sl->capacity == 0) ? 100 : sl->capacity * 2;
+		sl->similarities = (Similarity*)realloc(sl->similarities, sizeof(Similarity) * sl->capacity);
+	}
+
+	if (idx1 > idx2) { int temp = idx1; idx1 = idx2; idx2 = temp; }
+
+	Region* region1 = &rl->regions[idx1];
+	Region* region2 = &rl->regions[idx2];
+
+	const float w_color = W_COLOR;
+	const float w_texture = W_TEXTURE;
+	const float w_size = W_SIZE;
+	const float w_fill = W_FILL;
+
+	const float max_possible_score = (w_color * 3.0f) + (w_texture * 3.0f) + (w_size * 1.0f) + (w_fill * 1.0f);
+
+	float raw_similarity =
+		w_color * color_similarity(region1, region2) +
+		w_texture * texture_similarity(region1, region2) +
+		w_size * size_similarity(region1, region2, rl->img_size) +
+		w_fill * fill_similarity(region1, region2, rl->img_size);
+
+	float normalized_similarity = (max_possible_score > 0) ? raw_similarity / max_possible_score : 0;
+
+	sl->similarities[sl->count].region_idx1 = idx1;
+	sl->similarities[sl->count].region_idx2 = idx2;
+	sl->similarities[sl->count].similarity = normalized_similarity;
+	sl->count++;
+}
+
+Similarity* get_best_similarity(SimilarityList* sl, RegionList* rl, float min_size_factor) {
+	if (sl->count == 0) return NULL;
+	int best_idx = -1;
+
+	for (int i = 0; i < sl->count; i++) {
+		int i1 = sl->similarities[i].region_idx1;
+		int i2 = sl->similarities[i].region_idx2;
+		if (rl->regions[i1].size == 0 || rl->regions[i2].size == 0) continue;
+
+		best_idx = i;
+		break;
+	}
+	if (best_idx == -1) return NULL;
+
+	float best_score = -1.0f;
+	for (int i = 0; i < sl->count; i++) {
+		int i1 = sl->similarities[i].region_idx1;
+		int i2 = sl->similarities[i].region_idx2;
+		if (rl->regions[i1].size == 0 || rl->regions[i2].size == 0) continue;
+
+		float sim = sl->similarities[i].similarity;
+		int min_size = min(rl->regions[i1].size, rl->regions[i2].size);
+
+		// 크기가 작을수록 similarity 보정하여 높게
+		float boosted_sim = sim + (1.0f / (1 + min_size)) * min_size_factor;
+
+		if (boosted_sim > best_score) {
+			best_score = boosted_sim;
+			best_idx = i;
+		}
+	}
+	return &sl->similarities[best_idx];
+}
+
+
+
+void init_region_list(RegionList* region_list) {
+	region_list->capacity = 100;
+	region_list->count = 0;
+	region_list->regions = (Region*)malloc(sizeof(Region) * region_list->capacity);
+	region_list->img_size = 0;
+}
+
+int are_regions_adjacent(Region* a, Region* b) {
+	if (a->max_x + 1 < b->min_x || b->max_x + 1 < a->min_x) return 0;
+	if (a->max_y + 1 < b->min_y || b->max_y + 1 < a->min_y) return 0;
+	return 1;
+}
+
+RegionList create_regions(Image* img, DisjointSet* ds) {
+	int width = img->width;
+	int height = img->height;
+	int pixel_count = width * height;
+
+	RegionList rl;
+	init_region_list(&rl);
+	rl.img_size = pixel_count;
+
+	GradientPixel* grad_r = calculate_gradients(img, 0);
+	GradientPixel* grad_g = calculate_gradients(img, 1);
+	GradientPixel* grad_b = calculate_gradients(img, 2);
+
+	int map_size = ds->count;
+	int* parent_to_idx_map = malloc(sizeof(int) * map_size);
+	for (int i = 0; i < map_size; i++) parent_to_idx_map[i] = -1;
+
+	int region_count_final = 0;
+	for (int i = 0; i < pixel_count; i++) {
+		int parent = ds_find(ds, i);
+		if (parent_to_idx_map[parent] == -1) {
+			parent_to_idx_map[parent] = region_count_final++;
+		}
+	}
+
+	rl.capacity = region_count_final;
+	rl.count = region_count_final;
+	rl.regions = realloc(rl.regions, sizeof(Region) * rl.capacity);
+
+	rl.pixel_to_region = malloc(sizeof(int) * pixel_count);
+
+	float* raw_texture_hists = calloc(rl.capacity * 24, sizeof(float));
+
+	for (int i = 0; i < rl.count; i++) {
+		Region* region = &rl.regions[i];
+		region->size = 0;
+		region->min_x = width; region->max_x = 0;
+		region->min_y = height; region->max_y = 0;
+		for (int k = 0; k < 25; k++) region->r[k] = region->g[k] = region->b[k] = 0;
+	}
+
+	for (int i = 0; i < pixel_count; i++) {
+		int parent = ds_find(ds, i);
+		int idx = parent_to_idx_map[parent];
+
+		rl.pixel_to_region[i] = idx;
+		Region* region = &rl.regions[idx];
+		Pixel* pixel = &img->pixels[i];
+		int x = i % width;
+		int y = i / width;
+
+		if (region->size == 0) region->id = parent;
+
+		region->min_x = min(region->min_x, x);
+		region->max_x = max(region->max_x, x);
+		region->min_y = min(region->min_y, y);
+		region->max_y = max(region->max_y, y);
+
+		region->size++;
+
+		region->r[pixel->r * 25 / 256]++;
+		region->g[pixel->g * 25 / 256]++;
+		region->b[pixel->b * 25 / 256]++;
+
+		int bin;
+		bin = (int)(grad_r[i].ori / (2 * M_PI) * 8.0f);
+		raw_texture_hists[idx * 24 + (bin % 8)] += grad_r[i].mag;
+		bin = (int)(grad_g[i].ori / (2 * M_PI) * 8.0f);
+		raw_texture_hists[idx * 24 + 8 + (bin % 8)] += grad_g[i].mag;
+		bin = (int)(grad_b[i].ori / (2 * M_PI) * 8.0f);
+		raw_texture_hists[idx * 24 + 16 + (bin % 8)] += grad_b[i].mag;
+	}
+
+	rl.adjacent = malloc(sizeof(bool*) * rl.count);
+	for (int r = 0; r < rl.count; r++) {
+		rl.adjacent[r] = calloc(rl.count, sizeof(bool));
+	}
+
+	for (int y = 0; y < height - 1; y++) {
+		for (int x = 0; x < width - 1; x++) {
+			int r1_idx = rl.pixel_to_region[y * width + x];
+			int r2_idx = rl.pixel_to_region[y * width + x + 1];
+			int r3_idx = rl.pixel_to_region[(y + 1) * width + x];
+			if (r1_idx != r2_idx) rl.adjacent[r1_idx][r2_idx] = rl.adjacent[r2_idx][r1_idx] = true;
+			if (r1_idx != r3_idx) rl.adjacent[r1_idx][r3_idx] = rl.adjacent[r3_idx][r1_idx] = true;
+		}
+	}
+
+	for (int i = 0; i < rl.count; i++) {
+		Region* region = &rl.regions[i];
+		if (region->size == 0) continue;
+
+		for (int j = 0; j < 25; j++) {
+			region->color_hist[j] = (float)region->r[j] / region->size;
+			region->color_hist[j + 25] = (float)region->g[j] / region->size;
+			region->color_hist[j + 50] = (float)region->b[j] / region->size;
+		}
+
+		float* raw_hist_ptr = &raw_texture_hists[i * 24];
+
+		for (int k = 0; k < 24; k++) {
+			region->raw_texture_hist[k] = raw_hist_ptr[k];
+		}
+
+		float total_mag_r = 0, total_mag_g = 0, total_mag_b = 0;
+		for (int j = 0; j < 8; j++) total_mag_r += raw_hist_ptr[j];
+		for (int j = 0; j < 8; j++) total_mag_g += raw_hist_ptr[j + 8];
+		for (int j = 0; j < 8; j++) total_mag_b += raw_hist_ptr[j + 16];
+
+		if (total_mag_r > 0) for (int j = 0; j < 8; j++) region->texture_hist[j] = raw_hist_ptr[j] / total_mag_r;
+		else for (int j = 0; j < 8; j++) region->texture_hist[j] = 0;
+		if (total_mag_g > 0) for (int j = 0; j < 8; j++) region->texture_hist[j + 8] = raw_hist_ptr[j + 8] / total_mag_g;
+		else for (int j = 0; j < 8; j++) region->texture_hist[j + 8] = 0;
+		if (total_mag_b > 0) for (int j = 0; j < 8; j++) region->texture_hist[j + 16] = raw_hist_ptr[j + 16] / total_mag_b;
+		else for (int j = 0; j < 8; j++) region->texture_hist[j + 16] = 0;
+	}
+
+	free(raw_texture_hists);
+	free(parent_to_idx_map);
+	free(grad_r);
+	free(grad_g);
+	free(grad_b);
+	return rl;
+}
+
+SimilarityList calculate_similarity(RegionList* rl) {
+	int region_count = rl->count;
+	SimilarityList sl;
+	sl.capacity = region_count * region_count / 2;
+	sl.similarities = malloc(sizeof(Similarity) * sl.capacity);
+	sl.count = 0;
+
+	for (int i = 0; i < region_count; i++) {
+		for (int j = i + 1; j < region_count; j++) {
+			if (!rl->adjacent[i][j]) continue;
+			add_similarity(rl, &sl, i, j);
+		}
+	}
+	return sl;
+}
+
+void rl_free(RegionList* rl) {
+	if (rl) {
+		free(rl->regions);
+		free(rl->pixel_to_region);
+		if (rl->adjacent) {
+			for (int i = 0; i < rl->capacity; i++) {
+				free(rl->adjacent[i]);
+			}
+			free(rl->adjacent);
+		}
+	}
+}
+
+Region merge_regions(Region* r1, Region* r2) {
+	Region merged;
+
+	merged.id = min(r1->id, r2->id);
+	merged.size = r1->size + r2->size;
+
+	merged.min_x = min(r1->min_x, r2->min_x);
+	merged.min_y = min(r1->min_y, r2->min_y);
+	merged.max_x = max(r1->max_x, r2->max_x);
+	merged.max_y = max(r1->max_y, r2->max_y);
+
+	for (int i = 0; i < 25; i++) {
+		merged.r[i] = r1->r[i] + r2->r[i];
+		merged.g[i] = r1->g[i] + r2->g[i];
+		merged.b[i] = r1->b[i] + r2->b[i];
+	}
+
+	if (merged.size > 0) {
+		for (int i = 0; i < 25; i++) {
+			merged.color_hist[i] = (float)merged.r[i] / merged.size;
+			merged.color_hist[i + 25] = (float)merged.g[i] / merged.size;
+			merged.color_hist[i + 50] = (float)merged.b[i] / merged.size;
+		}
+	}
+
+	for (int i = 0; i < 24; i++) {
+		merged.raw_texture_hist[i] = r1->raw_texture_hist[i] + r2->raw_texture_hist[i];
+	}
+
+	float total_mag_r = 0, total_mag_g = 0, total_mag_b = 0;
+	for (int i = 0; i < 8; i++) total_mag_r += merged.raw_texture_hist[i];
+	for (int i = 0; i < 8; i++) total_mag_g += merged.raw_texture_hist[i + 8];
+	for (int i = 0; i < 8; i++) total_mag_b += merged.raw_texture_hist[i + 16];
+
+	if (total_mag_r > 0) for (int i = 0; i < 8; i++) merged.texture_hist[i] = merged.raw_texture_hist[i] / total_mag_r;
+	else for (int i = 0; i < 8; i++) merged.texture_hist[i] = 0;
+
+	if (total_mag_g > 0) for (int i = 0; i < 8; i++) merged.texture_hist[i + 8] = merged.raw_texture_hist[i + 8] / total_mag_g;
+	else for (int i = 0; i < 8; i++) merged.texture_hist[i + 8] = 0;
+
+	if (total_mag_b > 0) for (int i = 0; i < 8; i++) merged.texture_hist[i + 16] = merged.raw_texture_hist[i + 16] / total_mag_b;
+	else for (int i = 0; i < 8; i++) merged.texture_hist[i + 16] = 0;
+	
+
+	return merged;
+}
+
+int rl_merge_regions(RegionList* rl, int idx1, int idx2) {
+	if (idx1 == idx2) return -1;
+	int keep_idx = min(idx1, idx2);
+	int remove_idx = max(idx1, idx2);
+
+	rl->regions[keep_idx] = merge_regions(&rl->regions[idx1], &rl->regions[idx2]);
+	rl->regions[remove_idx].size = 0;
+
+	for (int i = 0; i < rl->count; i++) {
+		if (i == keep_idx || rl->regions[i].size == 0) continue;
+		rl->adjacent[keep_idx][i] = rl->adjacent[i][keep_idx] =
+			rl->adjacent[idx1][i] || rl->adjacent[idx2][i];
+	}
+
+	for (int i = 0; i < rl->count; i++) {
+		rl->adjacent[remove_idx][i] = rl->adjacent[i][remove_idx] = false;
+	}
+
+	//rl->count--;
+
+	return 0;
+}
+
+
+void remove_similarity_entries(SimilarityList* sl, int idx1, int idx2) {
+	int write_idx = 0;
+	for (int i = 0; i < sl->count; i++) {
+		int r1 = sl->similarities[i].region_idx1;
+		int r2 = sl->similarities[i].region_idx2;
+		if (r1 == idx1 || r1 == idx2 || r2 == idx1 || r2 == idx2) {
+			continue;
+		}
+		if (write_idx != i) {
+			sl->similarities[write_idx] = sl->similarities[i];
+		}
+		write_idx++;
+	}
+	sl->count = write_idx;
+}
+
+
+static GradientPixel* calculate_gradients(Image* img, int channel) {
+	int width = img->width;
+	int height = img->height;
+	int pixel_count = width * height;
+	GradientPixel* grads = (GradientPixel*)malloc(sizeof(GradientPixel) * pixel_count);
+
+	for (int y = 0; y < height; y++) {
+		for (int x = 0; x < width; x++) {
+			int idx = y * width + x;
+
+			int x_m1 = (x > 0) ? x - 1 : x;
+			int x_p1 = (x < width - 1) ? x + 1 : x;
+			int y_m1 = (y > 0) ? y - 1 : y;
+			int y_p1 = (y < height - 1) ? y + 1 : y;
+
+			float val_x_m1 = (float)get_pixel_channel(&img->pixels[y * width + x_m1], channel);
+			float val_x_p1 = (float)get_pixel_channel(&img->pixels[y * width + x_p1], channel);
+			float val_y_m1 = (float)get_pixel_channel(&img->pixels[y_m1 * width + x], channel);
+			float val_y_p1 = (float)get_pixel_channel(&img->pixels[y_p1 * width + x], channel);
+
+			float gx = val_x_p1 - val_x_m1;
+			float gy = val_y_p1 - val_y_m1;
+
+			grads[idx].mag = sqrtf(gx * gx + gy * gy);
+			grads[idx].ori = atan2f(gy, gx) + M_PI;
+		}
+	}
+	return grads;
+}
+
+int count_active_regions(RegionList* rl) {
+	int active_count = 0;
+	for (int i = 0; i < rl->count; i++) {
+		if (rl->regions[i].size > 0) {
+			active_count++;
+		}
+	}
+	return active_count;
+}
+
+// 후처리 함수: min_size보다 작은 영역들을 인접한 가장 유사한 영역에 강제 병합
+void enforce_min_region_size(RegionList* rl, DisjointSet* ds, int min_size) {
+	bool changed = true;
+	while (changed) {
+		changed = false;
+		for (int i = 0; i < rl->count; i++) {
+			// 이미 병합되었거나 최소 크기보다 큰 영역은 건너뜀
+			if (rl->regions[i].size == 0 || rl->regions[i].size >= min_size) {
+				continue;
+			}
+
+			// 현재 작은 영역(i)과 인접한 영역들 중 가장 유사한 영역을 찾음
+			int best_neighbor_idx = -1;
+			float max_similarity = -1.0f;
+
+			for (int j = 0; j < rl->count; j++) {
+				if (i == j || rl->regions[j].size == 0 || !rl->adjacent[i][j]) {
+					continue;
+				}
+
+				// 유사도 계산 (가중치는 헤더에 정의된 값을 사용)
+				float current_similarity =
+					W_COLOR * color_similarity(&rl->regions[i], &rl->regions[j]) +
+					W_TEXTURE * texture_similarity(&rl->regions[i], &rl->regions[j]) +
+					W_SIZE * size_similarity(&rl->regions[i], &rl->regions[j], rl->img_size) +
+					W_FILL * fill_similarity(&rl->regions[i], &rl->regions[j], rl->img_size);
+
+				if (current_similarity > max_similarity) {
+					max_similarity = current_similarity;
+					best_neighbor_idx = j;
+				}
+			}
+
+			// 병합할 대상을 찾았다면 병합 수행
+			if (best_neighbor_idx != -1) {
+				ds_union(ds, rl->regions[i].id, rl->regions[best_neighbor_idx].id);
+				rl_merge_regions(rl, i, best_neighbor_idx);
+				changed = true; // 변경이 있었으므로 루프를 다시 돌기 위해 플래그 설정
+			}
+		}
+	}
+}
+
+// BoundingBoxList 관련 함수 구현 추가
+void init_bbox_list(BoundingBoxList* bbl) {
+	bbl->count = 0;
+	bbl->capacity = 1024; // 적절한 초기 용량
+	bbl->boxes = (BoundingBox*)malloc(sizeof(BoundingBox) * bbl->capacity);
+}
+
+void free_bbox_list(BoundingBoxList* bbl) {
+	if (bbl && bbl->boxes) {
+		free(bbl->boxes);
+		bbl->boxes = NULL;
+	}
+}
+
+void add_bbox(BoundingBoxList* bbl, BoundingBox box) {
+	if (bbl->count >= bbl->capacity) {
+		bbl->capacity *= 2;
+		bbl->boxes = (BoundingBox*)realloc(bbl->boxes, sizeof(BoundingBox) * bbl->capacity);
+	}
+	bbl->boxes[bbl->count++] = box;
+}
+
+
+// selective_search_merge 함수 수정
+void selective_search_merge(RegionList* rl, DisjointSet* ds, BoundingBoxList* bbl, int max_merges, float min_size_factor) {
+	if (rl->count < 2) return;
+
+	SimilarityList sl = calculate_similarity(rl);
+	int merge_count = 0;
+
+	int active_regions = 0;
+	for (int i = 0; i < rl->count; i++) if (rl->regions[i].size > 0) active_regions++;
+
+	// threshold 체크를 제거하고, 활성 영역이 1개가 될 때까지 또는 최대 병합 횟수까지 반복
+	while (sl.count > 0 && active_regions > 1 && merge_count < max_merges) {
+		Similarity* best_sim = get_best_similarity(&sl, rl, min_size_factor);
+		if (!best_sim) break; // 더 이상 병합할 쌍이 없으면 종료
+
+		int r_idx1 = best_sim->region_idx1;
+		int r_idx2 = best_sim->region_idx2;
+
+		// 1. 새로운 Bounding Box를 생성하여 리스트에 추가
+		BoundingBox new_box;
+		new_box.min_x = min(rl->regions[r_idx1].min_x, rl->regions[r_idx2].min_x);
+		new_box.min_y = min(rl->regions[r_idx1].min_y, rl->regions[r_idx2].min_y);
+		new_box.max_x = max(rl->regions[r_idx1].max_x, rl->regions[r_idx2].max_x);
+		new_box.max_y = max(rl->regions[r_idx1].max_y, rl->regions[r_idx2].max_y);
+		add_bbox(bbl, new_box);
+
+		// 2. 기존 병합 로직 수행
+		ds_union(ds, rl->regions[r_idx1].id, rl->regions[r_idx2].id);
+		remove_similarity_entries(&sl, r_idx1, r_idx2);
+		rl_merge_regions(rl, r_idx1, r_idx2);
+
+		int keep_idx = min(r_idx1, r_idx2);
+		for (int j = 0; j < rl->count; j++) {
+			if (j == keep_idx || rl->regions[j].size == 0) continue;
+			if (rl->adjacent[keep_idx][j]) {
+				add_similarity(rl, &sl, keep_idx, j);
+			}
+		}
+		merge_count++;
+		active_regions--;
+	}
+	sl_free(&sl);
+}
+
+float calculate_iou(BoundingBox b1, BoundingBox b2) {
+	int x_left = max(b1.min_x, b2.min_x);
+	int y_top = max(b1.min_y, b2.min_y);
+	int x_right = min(b1.max_x, b2.max_x);
+	int y_bottom = min(b1.max_y, b2.max_y);
+
+	if (x_right < x_left || y_bottom < y_top) {
+		return 0.0f;
+	}
+
+	int intersection_area = (x_right - x_left) * (y_bottom - y_top);
+	int b1_area = (b1.max_x - b1.min_x) * (b1.max_y - b1.min_y);
+	int b2_area = (b2.max_x - b2.min_x) * (b2.max_y - b2.min_y);
+	float union_area = (float)(b1_area + b2_area - intersection_area);
+
+	return (union_area > 0) ? (intersection_area / union_area) : 0.0f;
+}
+
+// selective_search.c 파일 하단에 추가
+
+// NMS를 수행하여 중복된 경계 상자를 제거하는 함수
+void non_maximum_suppression(BoundingBoxList* bbl, float iou_threshold) {
+	if (bbl->count == 0) return;
+
+	// 1. 점수(score)를 임시로 할당 (먼저 생성된 박스일수록 높은 점수)
+	//    또한, 필터링 상태를 추적할 배열을 만듭니다.
+	bool* is_suppressed = (bool*)calloc(bbl->count, sizeof(bool));
+
+	// 2. 모든 박스 쌍에 대해 NMS 수행
+	for (int i = 0; i < bbl->count; i++) {
+		if (is_suppressed[i]) continue;
+
+		for (int j = i + 1; j < bbl->count; j++) {
+			if (is_suppressed[j]) continue;
+
+			float iou = calculate_iou(bbl->boxes[i], bbl->boxes[j]);
+
+			// i번 박스(더 높은 점수)와 IoU가 임계값 이상이면 j번 박스를 제거
+			if (iou > iou_threshold) {
+				is_suppressed[j] = true;
+			}
+		}
+	}
+
+	// 3. 제거되지 않은 박스들만 남겨서 BoundingBoxList를 재구성
+	BoundingBoxList filtered_bbl;
+	init_bbox_list(&filtered_bbl);
+	for (int i = 0; i < bbl->count; i++) {
+		if (!is_suppressed[i]) {
+			add_bbox(&filtered_bbl, bbl->boxes[i]);
+		}
+	}
+
+	// 기존 리스트를 필터링된 리스트로 교체
+	free(bbl->boxes);
+	*bbl = filtered_bbl;
+
+	free(is_suppressed);
+}
+
+// 한 상자(b2)가 다른 상자(b1) 안에 완전히 포함되는지 확인하는 함수
+bool is_box_fully_contained(BoundingBox b1, BoundingBox b2) {
+	return b1.min_x <= b2.min_x &&
+		b1.min_y <= b2.min_y &&
+		b1.max_x >= b2.max_x &&
+		b1.max_y >= b2.max_y;
+}
+
+// 포함된 상자들을 제거하는 함수
+void filter_nested_boxes(BoundingBoxList* bbl) {
+	if (bbl->count < 2) return;
+
+	bool* is_nested = (bool*)calloc(bbl->count, sizeof(bool));
+	if (!is_nested) return;
+
+	for (int i = 0; i < bbl->count; i++) {
+		for (int j = 0; j < bbl->count; j++) {
+			if (i == j) continue;
+			// j번 상자가 i번 상자 안에 완전히 포함되면, j번을 제거 대상으로 표시
+			if (is_box_fully_contained(bbl->boxes[i], bbl->boxes[j])) {
+				is_nested[j] = true;
+			}
+		}
+	}
+
+	// 제거되지 않은 상자들만 남겨서 리스트 재구성
+	BoundingBoxList filtered_bbl;
+	init_bbox_list(&filtered_bbl);
+	for (int i = 0; i < bbl->count; i++) {
+		if (!is_nested[i]) {
+			add_bbox(&filtered_bbl, bbl->boxes[i]);
+		}
+	}
+
+	free(bbl->boxes);
+	*bbl = filtered_bbl;
+	free(is_nested);
+}
+
+// selective_search.c 파일 하단에 이 함수 전체를 추가하세요.
+
+void filter_proposals_by_geometry(BoundingBoxList* bbl, int img_width, int img_height) {
+	BoundingBoxList filtered_bbl;
+	init_bbox_list(&filtered_bbl);
+
+	float min_size_ratio = 0.001f;  // 이미지 전체 크기의 0.1%보다 작은 박스는 제거
+	float max_size_ratio = 0.95f;   // 이미지 전체 크기의 95%보다 큰 박스는 제거
+	float max_aspect_ratio = 10.0f; // 가로/세로, 세로/가로 비율이 10배 이상인 박스는 제거
+	long img_area = (long)img_width * img_height;
+
+	for (int i = 0; i < bbl->count; i++) {
+		BoundingBox box = bbl->boxes[i];
+		long box_w = box.max_x - box.min_x;
+		long box_h = box.max_y - box.min_y;
+
+		if (box_w <= 0 || box_h <= 0) continue;
+
+		// 크기 필터링
+		long box_area = box_w * box_h;
+		if ((float)box_area / img_area < min_size_ratio || (float)box_area / img_area > max_size_ratio) {
+			continue;
+		}
+
+		// 비율 필터링
+		float aspect_ratio = (float)box_w / box_h;
+		if (aspect_ratio > max_aspect_ratio || aspect_ratio < (1.0f / max_aspect_ratio)) {
+			continue;
+		}
+
+		add_bbox(&filtered_bbl, box);
+	}
+
+	// 기존 리스트를 필터링된 리스트로 교체
+	free(bbl->boxes);
+	*bbl = filtered_bbl;
+}
+
+// main.c 파일 상단 (main 함수 위)
+
+// selective search 전체 파이프라인을 실행하고 최종 후보 리스트를 반환하는 함수
+BoundingBoxList run_selective_search_pipeline(Image* original_img, float k, float min_size_factor, float iou_threshold, int min_box_size) {
+    printf("\n--- Running Selective Search Pipeline (k=%.1f) ---\n", k);
+
+    // 최종 결과를 담을 리스트. 비어있는 상태로 초기화.
+    BoundingBoxList final_proposals;
+    init_bbox_list(&final_proposals);
+
+    // 1. 이미지 복사 및 Lab 변환
+    Image lab_base = copy_image(original_img);
+    if (!lab_base.pixels) {
+        fprintf(stderr, "Error: Failed to copy image.\n");
+        return final_proposals;
+    }
+    
+    Image img_lab;
+    convert_image_to_lab(&lab_base, &img_lab);
+    if (!img_lab.pixels) {
+        fprintf(stderr, "Error: Failed to convert image to Lab.\n");
+        free(lab_base.pixels);
+        return final_proposals;
+    }
+    
+    // 2. L* 채널 추출
+    Image img_l_channel;
+    img_l_channel.width = img_lab.width;
+    img_l_channel.height = img_lab.height;
+    img_l_channel.channels = 1;
+    img_l_channel.pixels = (Pixel*)malloc(sizeof(Pixel) * img_l_channel.width * img_l_channel.height);
+    if (!img_l_channel.pixels) {
+        fprintf(stderr, "Error: Failed to create L* channel image.\n");
+        free(lab_base.pixels);
+        free(img_lab.pixels);
+        return final_proposals;
+    }
+    for (int i = 0; i < img_l_channel.width * img_l_channel.height; i++) {
+        img_l_channel.pixels[i].r = img_lab.pixels[i].r;
+    }
+    
+    // 3. GBS, SS, 필터링 과정
+    DisjointSet ds;
+    graph_based_segmentation_grayscale(&ds, &img_l_channel, k);
+    
+    RegionList rl = create_regions(&img_lab, &ds);
+    printf("Before merge: %d active regions\n", count_active_regions(&rl));
+    
+    selective_search_merge(&rl, &ds, &final_proposals, 10000, min_size_factor);
+    printf("Generated %d raw proposals.\n", final_proposals.count);
+    
+    non_maximum_suppression(&final_proposals, iou_threshold);
+    printf("Filtered to %d proposals after NMS.\n", final_proposals.count);
+    
+    filter_nested_boxes(&final_proposals);
+    printf("Filtered to %d proposals after removing nested boxes.\n", final_proposals.count);
+    
+    filter_proposals_by_geometry(&final_proposals, original_img->width, original_img->height);
+    printf("Filtered to %d proposals after geometry filtering.\n", final_proposals.count);
+
+    // 4. 중간 단계에서 사용된 메모리 해제
+    free(lab_base.pixels);
+    free(img_lab.pixels);
+    free(img_l_channel.pixels);
+    ds_free(&ds);
+    rl_free(&rl);
+
+    printf("Pipeline finished. Returning final proposals.\n");
+    return final_proposals;
+}
+```
+```selective_search.h
+#ifndef __SELECTIVE_SEARCH_H__
+#define __SELECTIVE_SEARCH_H__
+
+#include "image.h"
+#include "disjoint_set.h"
+#include <stdbool.h>
+
+#define COLOR_BINS 25
+#define TEXTURE_BINS 8
+#define COLOR_HIST_SIZE (COLOR_BINS * 3)
+#define TEXTURE_HIST_SIZE (TEXTURE_BINS * 3)
+
+#define W_COLOR 2.0f
+#define W_TEXTURE 0.5f
+#define W_SIZE 1.0f
+#define W_FILL 1.5f
+
+typedef struct {
+    int id;
+    int size;
+    int min_x, min_y;
+    int max_x, max_y;
+
+    float color_hist[COLOR_HIST_SIZE];
+    int r[COLOR_BINS], g[COLOR_BINS], b[COLOR_BINS];
+
+    float texture_hist[TEXTURE_HIST_SIZE];
+    float raw_texture_hist[TEXTURE_HIST_SIZE];
+} Region;
+
+typedef struct {
+    Region* regions;
+    int count;
+    int capacity;
+    int img_size;
+    int* pixel_to_region;
+    bool** adjacent;
+} RegionList;
+
+typedef struct {
+    int region_idx1;
+    int region_idx2;
+    float similarity;
+} Similarity;
+
+typedef struct {
+    Similarity* similarities;
+    int count;
+    int capacity;
+} SimilarityList;
+
+// Bounding Box 구조체
+typedef struct {
+    int min_x, min_y, max_x, max_y;
+} BoundingBox;
+
+// Bounding Box 리스트 구조체
+typedef struct {
+    BoundingBox* boxes;
+    int count;
+    int capacity;
+} BoundingBoxList;
+
+
+void init_region_list(RegionList* rl);
+void rl_free(RegionList* rl);
+RegionList create_regions(Image* img, DisjointSet* ds);
+int rl_merge_regions(RegionList* rl, int idx1, int idx2);
+Region merge_regions(const Region* r1, const Region* r2);
+
+
+SimilarityList calculate_similarity(RegionList* rl);
+void add_similarity(RegionList* rl, SimilarityList* sl, int idx1, int idx2);
+void remove_similarity_entries(SimilarityList* sl, int idx1, int idx2);
+void sl_free(SimilarityList* sl);
+
+
+float color_similarity(const Region* region1, const Region* region2);
+float texture_similarity(const Region* region1, const Region* region2);
+float size_similarity(const Region* region1, const Region* region2, int img_size);
+float fill_similarity(const Region* region1, const Region* region2, int img_size);
+
+
+void selective_search_merge(RegionList* rl, DisjointSet* ds, float threshold, int max_merges, float min_size_factor);
+Similarity* get_best_similarity(SimilarityList* sl, RegionList* rl, float min_size_factor);
+
+
+int count_active_regions(RegionList* rl);
+
+// BoundingBoxList 초기화 및 해제 함수 선언 추가
+void init_bbox_list(BoundingBoxList* bbl);
+void free_bbox_list(BoundingBoxList* bbl);
+
+// selective_search_merge 함수 시그니처 변경
+void selective_search_merge(RegionList* rl, DisjointSet* ds, BoundingBoxList* bbl, int max_merges, float min_size_factor);
+
+float calculate_iou(BoundingBox b1, BoundingBox b2);
+void non_maximum_suppression(BoundingBoxList* bbl, float iou_threshold);
+
+bool is_box_fully_contained(BoundingBox b1, BoundingBox b2);
+
+void filter_nested_boxes(BoundingBoxList* bbl);
+
+void filter_proposals_by_geometry(BoundingBoxList* bbl, int img_width, int img_height);
+
+BoundingBoxList run_selective_search_pipeline(Image* original_img, float k, float min_size_factor, float iou_threshold, int min_box_size);
+
+#endif // __SELECTIVE_SEARCH_H__
+
+```
+```test.c
+#include "stb_image.h"
+#include "image.h"
+#include "utils.h"
+#include "selective_search.h"
+
+#include <stdio.h>
+
+int image_load_test() {
+
+    printf("==========================================\n");
+    printf("=============== Image Load ===============\n");
+    printf("\n");
+
+    int success;
+    const char* file = "test.jpg";
+    Image MyImage;
+    
+    printf("Target File: '%s'\n", file);
+
+    success = load_image(&MyImage, file);
+
+    if (success == 1) {
+        if (MyImage.width != 4032 || MyImage.height != 3024 || MyImage.channels != 3) {
+            success = 0;
+        }
+    }
+
+    if (success == 0) {
+        printf("\n");
+        printf("=============== Test Failed ==============\n");
+        printf("==========================================\n");
+        return 0;
+    }
+
+    // expected: Width: 4032, Height: 3024, Channels: 3
+    printf("Width: %d, Height: %d, Channels: %d\n", MyImage.width, MyImage.height, MyImage.channels);
+
+    // expected: First Pixel (R, G, B): (146, 149, 154)
+    if (MyImage.channels >= 3) {
+        printf("First Pixel (R, G, B): (%u, %u, %u)\n", MyImage.pixels->r, MyImage.pixels->g, MyImage.pixels->b);
+    }
+
+
+    printf("\n");
+    printf("=============== Test Passed ==============\n");
+    printf("==========================================\n");
+
+    return 1;
+}
+
+int pixel_distance_test() {
+
+    printf("==========================================\n");
+    printf("=============== Image Load ===============\n");
+    printf("\n");
+
+    float distance;
+
+    Pixel a = { 40, 44, 52 };
+    Pixel b = { 106, 76, 158 };
+    
+    // expected: 128.90306..
+    distance = pixel_distance(a, b);
+    printf("Pixel Distance (bw. (%d, %d, %d), (%d, %d, %d)): %.2f\n", a.r, a.g, a.b, b.r, b.g, b.b, distance);
+
+
+    printf("\n");
+    printf("=============== Test Passed ==============\n");
+    printf("==========================================\n");
+
+    return 1;
+
+}
+```
+```test.h
+#ifndef __TEST_H__
+#define __TEST_H__
+
+int image_load_test();
+
+int pixel_distance_test();
+
+#endif // !__TEST_H__
+
+```
+```utils.c
+#include <stdio.h>
+#include <windows.h>
+#include <stdlib.h>
+#include <stdint.h>
+#include <stdbool.h>
+#include <string.h>
+#include <time.h>
+
+#include "utils.h"
+#include "image.h"
+#include "selective_search.h"
+#include "disjoint_set.h"
+
+
+void draw_rectangle(Pixel* data, int width, int height, BoundingBox box, Pixel color) {
+    for (int x = box.min_x; x <= box.max_x; x++) {
+        if (x >= 0 && x < width) {
+            if (box.min_y >= 0 && box.min_y < height) data[box.min_y * width + x] = color;
+            if (box.max_y >= 0 && box.max_y < height) data[box.max_y * width + x] = color;
+        }
+    }
+    for (int y = box.min_y; y <= box.max_y; y++) {
+        if (y >= 0 && y < height) {
+            if (box.min_x >= 0 && box.min_x < width) data[y * width + box.min_x] = color;
+            if (box.max_x >= 0 && box.max_x < width) data[y * width + box.max_x] = color;
+        }
+    }
+}
+
+void visualize_bounding_boxes(Image* img, BoundingBoxList* bbl, const char* filename) {
+    Image vis_img = copy_image(img);
+    Pixel color = { 255, 0, 0 }; // 빨간색
+    for (int i = 0; i < bbl->count; i++) {
+        draw_rectangle(vis_img.pixels, vis_img.width, vis_img.height, bbl->boxes[i], color);
+    }
+    save_bmp(filename, vis_img.pixels, vis_img.width, vis_img.height);
+    free(vis_img.pixels);
+}
+
+void save_bmp(const char* filename, Pixel* data, int width, int height) {
+    FILE* f = fopen(filename, "wb");
+    if (!f) return;
+
+    int row_padded = (width * 3 + 3) & (~3);
+    int image_size = row_padded * height;
+
+    BITMAPFILEHEADER bfh = { 0 };
+    BITMAPINFOHEADER bih = { 0 };
+
+    bfh.bfType = 0x4D42;
+    bfh.bfSize = sizeof(BITMAPFILEHEADER) + sizeof(BITMAPINFOHEADER) + image_size;
+    bfh.bfOffBits = sizeof(BITMAPFILEHEADER) + sizeof(BITMAPINFOHEADER);
+
+    bih.biSize = sizeof(BITMAPINFOHEADER);
+    bih.biWidth = width;
+    bih.biHeight = -height; // top-down
+    bih.biPlanes = 1;
+    bih.biBitCount = 24;
+    bih.biCompression = 0;
+    bih.biSizeImage = image_size;
+
+    fwrite(&bfh, sizeof(bfh), 1, f);
+    fwrite(&bih, sizeof(bih), 1, f);
+
+    uint8_t* row = calloc(1, row_padded);
+    for (int y = 0; y < height; y++) {
+        for (int x = 0; x < width; x++) {
+            Pixel p = data[y * width + x];
+            row[x * 3 + 0] = p.b;
+            row[x * 3 + 1] = p.g;
+            row[x * 3 + 2] = p.r;
+        }
+        fwrite(row, 1, row_padded, f);
+    }
+    free(row);
+    fclose(f);
+}
+
+#define MAX_LABELS 1000000
+
+void visualize_labels(DisjointSet* ds, const char* filename, int width, int height) {
+    int pixel_count = width * height;
+    int* labels = malloc(sizeof(int) * pixel_count);
+    if (!labels) {
+        fprintf(stderr, "malloc failed for labels\n");
+        return;
+    }
+
+    for (int i = 0; i < pixel_count; i++) {
+        labels[i] = ds_find(ds, i);
+    }
+
+    Pixel* output = malloc(sizeof(Pixel) * pixel_count);
+    if (!output) {
+        fprintf(stderr, "malloc failed for output\n");
+        free(labels);
+        return;
+    }
+
+    Pixel* label_colors = malloc(sizeof(Pixel) * MAX_LABELS);
+    if (!label_colors) {
+        fprintf(stderr, "malloc failed for label_colors\n");
+        free(labels);
+        free(output);
+        return;
+    }
+
+    bool* label_assigned = calloc(MAX_LABELS, sizeof(bool));
+    if (!label_assigned) {
+        fprintf(stderr, "calloc failed for label_assigned\n");
+        free(labels);
+        free(output);
+        free(label_colors);
+        return;
+    }
+    
+    ////////////////////////////////////////////////////////////////
+
+    srand((unsigned int)time(NULL));
+
+    for (int i = 0; i < pixel_count; i++) {
+        int label = labels[i];
+        if (label < 0 || label >= MAX_LABELS) {
+            fprintf(stderr, "Warning: invalid label %d at pixel %d\n", label, i);
+            label = 0;
+        }
+        if (!label_assigned[label]) {
+            label_colors[label].r = rand() % 256;
+            label_colors[label].g = rand() % 256;
+            label_colors[label].b = rand() % 256;
+            label_assigned[label] = true;
+        }
+        output[i] = label_colors[label];
+    }
+
+    save_bmp(filename, output, width, height);
+
+    free(labels);
+    free(output);
+    free(label_colors);
+    free(label_assigned);
+}
+
+void visualize_regions(RegionList* rl, int width, int height, const char* filename) {
+    Pixel* output = malloc(sizeof(Pixel) * width * height);
+    if (!output) return;
+
+    int* label_map = malloc(sizeof(int) * width * height);
+    if (!label_map) {
+        free(output);
+        return;
+    }
+
+    for (int i = 0; i < width * height; i++) label_map[i] = -1;
+
+    Pixel* region_colors = malloc(sizeof(Pixel) * rl->count);
+    if (!region_colors) {
+        free(output);
+        free(label_map);
+        return;
+    }
+
+    srand((unsigned int)time(NULL));
+    for (int i = 0; i < rl->count; i++) {
+        region_colors[i].r = rand() % 256;
+        region_colors[i].g = rand() % 256;
+        region_colors[i].b = rand() % 256;
+    }
+
+    for (int i = 0; i < rl->count; i++) {
+        Region* r = &rl->regions[i];
+        for (int y = r->min_y; y <= r->max_y; y++) {
+            for (int x = r->min_x; x <= r->max_x; x++) {
+                int idx = y * width + x;
+                if (idx < 0 || idx >= width * height) continue;
+                label_map[idx] = i;
+            }
+        }
+    }
+
+    for (int i = 0; i < width * height; i++) {
+        int label = label_map[i];
+        if (label >= 0 && label < rl->count) {
+            output[i] = region_colors[label];
+        }
+        else {
+            output[i].r = 0;
+            output[i].g = 0;
+            output[i].b = 0;
+        }
+    }
+
+    save_bmp(filename, output, width, height);
+
+    free(output);
+    free(label_map);
+    free(region_colors);
+}
+
+
+
+void list_files_in_current_dir() {
+    WIN32_FIND_DATAA findData;
+
+    HANDLE hFind = INVALID_HANDLE_VALUE;
+
+    hFind = FindFirstFileA(".\\*", &findData);
+
+    if (hFind == INVALID_HANDLE_VALUE) {
+        printf("Error: Cannot find folder.\n");
+        return;
+    }
+
+    printf("--- File List ---\n");
+
+    do {
+        printf("%s\n", findData.cFileName);
+    } while (FindNextFileA(hFind, &findData) != 0);
+
+    printf("--------------------------\n");
+
+    FindClose(hFind);
+
+}
+
+void print_array_int(int* arr, int size) {
+    printf("[");
+    for (int i = 0; i < size; i++) {
+        printf("%d", arr[i]);
+        if (i < size - 1) printf(", ");
+    }
+    printf("]\n");
+}
+
+void print_array_float(float* arr, int size) {
+    printf("[");
+    for (int i = 0; i < size; i++) {
+        printf("%.2f", arr[i]);
+        if (i < size - 1) printf(", ");
+    }
+    printf("]\n");
+}
+```
+```utils.h
+#ifndef __UTILS_H__
+#define __UTILS_H__
+
+#include <windows.h> // windows.h를 여기에 포함
+
+#include "disjoint_set.h"
+#include "selective_search.h"
+
+
+ // 함수 선언
+void list_files_in_current_dir();
+void save_bmp(const char* filename, Pixel* data, int width, int height);
+void visualize_labels(DisjointSet* ds, const char* filename, int width, int height);
+void visualize_regions(RegionList* rl, int width, int height, const char* filename);
+void visualize_bounding_boxes(Image* img, BoundingBoxList* bbl, const char* filename); // 선언 추가
+void print_array_int(int* arr, int size);
+void print_array_float(float* arr, int size);
+void draw_rectangle(Pixel* data, int width, int height, BoundingBox box, Pixel color); // 선언 추가
+
+#endif // !__UTILS_H__
+```

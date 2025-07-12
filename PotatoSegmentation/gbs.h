@@ -3,6 +3,7 @@
 
 #include "image.h"
 #include "disjoint_set.h"
+#include "selective_search.h"
 
 #include <stdio.h>
 
@@ -37,5 +38,9 @@ void sort_edge_list(EdgeList* list);
 void merge_components(EdgeList* edges, DisjointSet* ds, int* size, float* internal, float k);
 
 void graph_based_segmentation(DisjointSet* ds, Image* img, float k, float sigma);
+
+void graph_based_segmentation_grayscale(DisjointSet* ds, Image* img, float k);
+
+void enforce_min_region_size(RegionList* rl, DisjointSet* ds, int min_size);
 
 #endif // !__GBS__

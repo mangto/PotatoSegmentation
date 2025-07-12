@@ -2,7 +2,22 @@
 #include "image.h"
 #include "stb_image.h"
 #include <stdio.h>
+#include <string.h> 
 
+Image copy_image(Image* src) {
+    Image dst;
+    dst.width = src->width;
+    dst.height = src->height;
+    dst.channels = src->channels;
+
+    int image_size = src->width * src->height;
+    dst.pixels = (Pixel*)malloc(sizeof(Pixel) * image_size);
+
+    if (dst.pixels != NULL) {
+        memcpy(dst.pixels, src->pixels, sizeof(Pixel) * image_size);
+    }
+    return dst;
+}
 
 // Get pixel with cord
 Pixel get_pixel(Image* img, int x, int y) {

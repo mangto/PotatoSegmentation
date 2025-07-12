@@ -16,4 +16,10 @@ void apply_kernel(Image* img, Matrix* kernel);
 
 Matrix create_gaussian_kernel(int size, float sigma);
 
+HSV rgb_to_hsv(Pixel p);
+void convert_image_to_hsv(Image* src, Image* dst);
+
+Lab rgb_to_lab(Pixel p);
+void convert_image_to_lab(Image* src, Image* dst);
+
 #endif // !__IMAGE__PROCESS_H__

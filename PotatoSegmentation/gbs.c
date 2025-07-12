@@ -170,6 +170,8 @@ void graph_based_segmentation(DisjointSet* ds, Image* img, float k, float sigma)
 
 	apply_kernel(img, &gaussian);
 
+	//contrast_stretch(img, 0.5);
+
 	for (int i = 0; i < pixel_count; i++) {
 		size[i] = 1;
 		internal[i] = 0.0f;
@@ -187,6 +189,61 @@ void graph_based_segmentation(DisjointSet* ds, Image* img, float k, float sigma)
 
 	free_edges(&edges);
 	free_matrix(&gaussian);
+	free(size);
+	free(internal);
+}
+
+// Calculates the distance between two pixels in a 1-channel (grayscale) image.
+float pixel_distance_gray(Pixel a, Pixel b) {
+	// Uses the R channel to calculate the absolute difference as the distance.
+	return fabsf((float)a.r - (float)b.r);
+}
+
+// Builds an edge graph for a 1-channel image.
+void build_edge_graph_gray(Image* img, EdgeList* edges) {
+	const int dx[4] = { 1, 0, 1, 1 }; // Considers only 4 directions, not 8.
+	const int dy[4] = { 0, 1, -1, 1 };
+
+	int width = img->width;
+	int height = img->height;
+
+	for (int y = 0; y < height; y++) {
+		for (int x = 0; x < width; x++) {
+			int idx1 = y * width + x;
+			for (int i = 0; i < 4; i++) {
+				int nx = x + dx[i];
+				int ny = y + dy[i];
+				if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
+					int idx2 = ny * width + nx;
+					float weight = pixel_distance_gray(img->pixels[idx1], img->pixels[idx2]);
+					add_edge(edges, idx1, idx2, weight);
+				}
+			}
+		}
+	}
+}
+
+// Performs Graph-Based Segmentation on a 1-channel (grayscale) image.
+void graph_based_segmentation_grayscale(DisjointSet* ds, Image* img, float k) {
+	EdgeList edges;
+	int pixel_count = img->width * img->height;
+	int* size = malloc(sizeof(int) * pixel_count);
+	float* internal = malloc(sizeof(float) * pixel_count);
+
+	for (int i = 0; i < pixel_count; i++) {
+		size[i] = 1;
+		internal[i] = 0.0f;
+	}
+
+	init_edge_list(&edges, pixel_count * 2); // Initializes with a larger buffer.
+	build_edge_graph_gray(img, &edges);
+	sort_edge_list(&edges);
+	ds_init(ds, pixel_count);
+
+	// merge_components is used as is (no changes needed).
+	merge_components(&edges, ds, size, internal, k);
+
+	free_edges(&edges);
 	free(size);
 	free(internal);
 }

@@ -2,10 +2,13 @@
 #include "disjoint_set.h"
 #include "image.h"
 #include "utils.h"
+#include "gbs.h"
+#include "image_process.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
+#include <string.h>
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -115,7 +118,7 @@ Similarity* get_best_similarity(SimilarityList* sl, RegionList* rl, float min_si
 		float sim = sl->similarities[i].similarity;
 		int min_size = min(rl->regions[i1].size, rl->regions[i2].size);
 
-		// 크기가 작을수록 similarity 보정하여 높게
+		// Boosts similarity for smaller regions.
 		float boosted_sim = sim + (1.0f / (1 + min_size)) * min_size_factor;
 
 		if (boosted_sim > best_score) {
@@ -240,6 +243,11 @@ RegionList create_regions(Image* img, DisjointSet* ds) {
 		}
 
 		float* raw_hist_ptr = &raw_texture_hists[i * 24];
+
+		for (int k = 0; k < 24; k++) {
+			region->raw_texture_hist[k] = raw_hist_ptr[k];
+		}
+
 		float total_mag_r = 0, total_mag_g = 0, total_mag_b = 0;
 		for (int j = 0; j < 8; j++) total_mag_r += raw_hist_ptr[j];
 		for (int j = 0; j < 8; j++) total_mag_g += raw_hist_ptr[j + 8];
@@ -261,20 +269,20 @@ RegionList create_regions(Image* img, DisjointSet* ds) {
 	return rl;
 }
 
-SimilarityList calculate_similarity(RegionList* rl) {
-	int region_count = rl->count;
-	SimilarityList sl;
-	sl.capacity = region_count * region_count / 2;
-	sl.similarities = malloc(sizeof(Similarity) * sl.capacity);
-	sl.count = 0;
+void calculate_similarity(RegionList* rl, SimilarityList* sl) {
+	for (int i = 0; i < rl->count; i++) {
+		// Skips inactive regions (optimization).
+		if (rl->regions[i].size == 0) continue;
 
-	for (int i = 0; i < region_count; i++) {
-		for (int j = i + 1; j < region_count; j++) {
-			if (!rl->adjacent[i][j]) continue;
-			add_similarity(rl, &sl, i, j);
+		for (int j = i + 1; j < rl->count; j++) {
+			if (rl->regions[j].size == 0) continue;
+
+			// Calculates similarity only for adjacent regions.
+			if (rl->adjacent[i][j]) {
+				add_similarity(rl, sl, i, j);
+			}
 		}
 	}
-	return sl;
 }
 
 void rl_free(RegionList* rl) {
@@ -315,22 +323,24 @@ Region merge_regions(Region* r1, Region* r2) {
 		}
 	}
 
-	float merged_raw_texture_hist[24];
 	for (int i = 0; i < 24; i++) {
-		merged_raw_texture_hist[i] = (r1->texture_hist[i] * r1->size) + (r2->texture_hist[i] * r2->size);
+		merged.raw_texture_hist[i] = r1->raw_texture_hist[i] + r2->raw_texture_hist[i];
 	}
 
 	float total_mag_r = 0, total_mag_g = 0, total_mag_b = 0;
-	for (int i = 0; i < 8; i++) total_mag_r += merged_raw_texture_hist[i];
-	for (int i = 0; i < 8; i++) total_mag_g += merged_raw_texture_hist[i + 8];
-	for (int i = 0; i < 8; i++) total_mag_b += merged_raw_texture_hist[i + 16];
+	for (int i = 0; i < 8; i++) total_mag_r += merged.raw_texture_hist[i];
+	for (int i = 0; i < 8; i++) total_mag_g += merged.raw_texture_hist[i + 8];
+	for (int i = 0; i < 8; i++) total_mag_b += merged.raw_texture_hist[i + 16];
 
-	if (total_mag_r > 0) for (int i = 0; i < 8; i++) merged.texture_hist[i] = merged_raw_texture_hist[i] / total_mag_r;
+	if (total_mag_r > 0) for (int i = 0; i < 8; i++) merged.texture_hist[i] = merged.raw_texture_hist[i] / total_mag_r;
 	else for (int i = 0; i < 8; i++) merged.texture_hist[i] = 0;
-	if (total_mag_g > 0) for (int i = 0; i < 8; i++) merged.texture_hist[i + 8] = merged_raw_texture_hist[i + 8] / total_mag_g;
+
+	if (total_mag_g > 0) for (int i = 0; i < 8; i++) merged.texture_hist[i + 8] = merged.raw_texture_hist[i + 8] / total_mag_g;
 	else for (int i = 0; i < 8; i++) merged.texture_hist[i + 8] = 0;
-	if (total_mag_b > 0) for (int i = 0; i < 8; i++) merged.texture_hist[i + 16] = merged_raw_texture_hist[i + 16] / total_mag_b;
+
+	if (total_mag_b > 0) for (int i = 0; i < 8; i++) merged.texture_hist[i + 16] = merged.raw_texture_hist[i + 16] / total_mag_b;
 	else for (int i = 0; i < 8; i++) merged.texture_hist[i + 16] = 0;
+
 
 	return merged;
 }
@@ -353,6 +363,8 @@ int rl_merge_regions(RegionList* rl, int idx1, int idx2) {
 		rl->adjacent[remove_idx][i] = rl->adjacent[i][remove_idx] = false;
 	}
 
+	//rl->count--;
+
 	return 0;
 }
 
@@ -371,57 +383,6 @@ void remove_similarity_entries(SimilarityList* sl, int idx1, int idx2) {
 		write_idx++;
 	}
 	sl->count = write_idx;
-}
-
-void selective_search_merge(RegionList* rl, DisjointSet* ds, float threshold, int max_merges, float min_size_factor) {
-    if (rl->count < 2) return;
-
-    SimilarityList sl = calculate_similarity(rl);
-    int merge_count = 0;
-
-    while (sl.count > 0 && rl->count > 1 && merge_count < max_merges) {
-        Similarity* best_sim = get_best_similarity(&sl, rl, min_size_factor);
-        if (!best_sim || best_sim->similarity < threshold) break;
-
-        int r_idx1 = best_sim->region_idx1;
-        int r_idx2 = best_sim->region_idx2;
-
-        int keep_idx = min(r_idx1, r_idx2);
-        int remove_idx = max(r_idx1, r_idx2);
-
-        ds_union(ds, rl->regions[r_idx1].id, rl->regions[r_idx2].id);
-
-        remove_similarity_entries(&sl, r_idx1, r_idx2);
-
-        rl_merge_regions(rl, r_idx1, r_idx2);
-
-        for (int j = 0; j < rl->count; j++) {
-            if (j == keep_idx) continue;
-            if (rl->adjacent[keep_idx][j]) {
-                add_similarity(rl, &sl, keep_idx, j);
-            }
-        }
-        merge_count++;
-    }
-
-    sl_free(&sl);
-}
-
-void selective_search_merge_multi_stage(
-	RegionList* rl,
-	DisjointSet* ds,
-	float start_threshold,
-	float end_threshold,
-	float threshold_step,
-	int max_merges_per_stage,
-	float min_size_factor
-) {
-	float current_threshold = start_threshold;
-
-	while (current_threshold >= end_threshold) {
-		selective_search_merge(rl, ds, current_threshold, max_merges_per_stage, min_size_factor);
-		current_threshold -= threshold_step;
-	}
 }
 
 
@@ -453,4 +414,298 @@ static GradientPixel* calculate_gradients(Image* img, int channel) {
 		}
 	}
 	return grads;
+}
+
+int count_active_regions(RegionList* rl) {
+	int active_count = 0;
+	for (int i = 0; i < rl->count; i++) {
+		if (rl->regions[i].size > 0) {
+			active_count++;
+		}
+	}
+	return active_count;
+}
+
+// Adds BoundingBoxList-related functions.
+void init_bbox_list(BoundingBoxList* bbl) {
+	bbl->count = 0;
+	bbl->capacity = 1024; // Sets an initial capacity.
+	bbl->boxes = (BoundingBox*)malloc(sizeof(BoundingBox) * bbl->capacity);
+}
+
+void free_bbox_list(BoundingBoxList* bbl) {
+	if (bbl && bbl->boxes) {
+		free(bbl->boxes);
+		bbl->boxes = NULL;
+	}
+}
+
+void add_bbox(BoundingBoxList* bbl, BoundingBox box) {
+	if (bbl->count >= bbl->capacity) {
+		bbl->capacity *= 2;
+		bbl->boxes = (BoundingBox*)realloc(bbl->boxes, sizeof(BoundingBox) * bbl->capacity);
+	}
+	bbl->boxes[bbl->count++] = box;
+}
+
+
+// Replaces the selective_search_merge function in selective_search.c with the code below.
+
+void selective_search_merge(RegionList* rl, DisjointSet* ds, BoundingBoxList* bbl, int max_merges, float min_size_factor) {
+	if (rl->count < 2) return;
+
+	// 1. Calculates initial similarity between adjacent regions.
+	SimilarityList sl;
+	init_similarity_list(&sl, rl->count); // init_similarity_list function required
+	calculate_similarity(rl, &sl);
+
+	int merge_count = 0;
+	int active_regions = count_active_regions(rl);
+
+	// 2. Repeats until there is only one active region or the maximum number of merges is reached.
+	while (sl.count > 0 && active_regions > 1 && merge_count < max_merges) {
+		// Finds the best pair to merge.
+		Similarity* best_sim = get_best_similarity(&sl, rl, min_size_factor);
+		if (!best_sim) break;
+
+		int r_idx1 = best_sim->region_idx1;
+		int r_idx2 = best_sim->region_idx2;
+
+		// 3. Creates a new bounding box and adds it to the list (new).
+		BoundingBox new_box;
+		new_box.min_x = min(rl->regions[r_idx1].min_x, rl->regions[r_idx2].min_x);
+		new_box.min_y = min(rl->regions[r_idx1].min_y, rl->regions[r_idx2].min_y);
+		new_box.max_x = max(rl->regions[r_idx1].max_x, rl->regions[r_idx2].max_x);
+		new_box.max_y = max(rl->regions[r_idx1].max_y, rl->regions[r_idx2].max_y);
+		add_bbox(bbl, new_box);
+
+		// 4. Merges regions and updates the similarity list.
+		ds_union(ds, rl->regions[r_idx1].id, rl->regions[r_idx2].id);
+
+		int keep_idx = min(r_idx1, r_idx2);
+
+		// Removes all similarity entries related to the merged regions.
+		remove_similarity_entries(&sl, r_idx1, r_idx2);
+
+		// Merges the regions.
+		rl_merge_regions(rl, r_idx1, r_idx2);
+
+		// Calculates and adds new similarities for the newly merged region.
+		for (int j = 0; j < rl->count; j++) {
+			if (j == keep_idx || rl->regions[j].size == 0) continue;
+			if (rl->adjacent[keep_idx][j]) {
+				add_similarity(rl, &sl, keep_idx, j);
+			}
+		}
+
+		merge_count++;
+		active_regions--;
+	}
+	sl_free(&sl);
+}
+
+float calculate_iou(BoundingBox b1, BoundingBox b2) {
+	int x_left = max(b1.min_x, b2.min_x);
+	int y_top = max(b1.min_y, b2.min_y);
+	int x_right = min(b1.max_x, b2.max_x);
+	int y_bottom = min(b1.max_y, b2.max_y);
+
+	if (x_right < x_left || y_bottom < y_top) {
+		return 0.0f;
+	}
+
+	int intersection_area = (x_right - x_left) * (y_bottom - y_top);
+	int b1_area = (b1.max_x - b1.min_x) * (b1.max_y - b1.min_y);
+	int b2_area = (b2.max_x - b2.min_x) * (b2.max_y - b2.min_y);
+	float union_area = (float)(b1_area + b2_area - intersection_area);
+
+	return (union_area > 0) ? (intersection_area / union_area) : 0.0f;
+}
+
+// Added to the bottom of selective_search.c
+
+// A function that removes duplicate proposal boxes using NMS.
+void non_maximum_suppression(BoundingBoxList* bbl, float iou_threshold) {
+	if (bbl->count == 0) return;
+
+	// 1. Temporarily assign a score (here, we assume all boxes have the same confidence).
+	//    Instead, we use an array to track the suppression status.
+	bool* is_suppressed = (bool*)calloc(bbl->count, sizeof(bool));
+
+	// 2. Perform NMS on all pairs of boxes.
+	for (int i = 0; i < bbl->count; i++) {
+		if (is_suppressed[i]) continue;
+
+		for (int j = i + 1; j < bbl->count; j++) {
+			if (is_suppressed[j]) continue;
+
+			float iou = calculate_iou(bbl->boxes[i], bbl->boxes[j]);
+
+			// If the IoU with box i (which has a higher score) is above the threshold, suppress box j.
+			if (iou > iou_threshold) {
+				is_suppressed[j] = true;
+			}
+		}
+	}
+
+	// 3. Rebuild the BoundingBoxList with only the unsuppressed boxes.
+	BoundingBoxList filtered_bbl;
+	init_bbox_list(&filtered_bbl);
+	for (int i = 0; i < bbl->count; i++) {
+		if (!is_suppressed[i]) {
+			add_bbox(&filtered_bbl, bbl->boxes[i]);
+		}
+	}
+
+	// Replace the original list with the filtered list.
+	free(bbl->boxes);
+	*bbl = filtered_bbl;
+
+	free(is_suppressed);
+}
+
+// A function that checks if one box (b2) is fully contained within another (b1).
+bool is_box_fully_contained(BoundingBox b1, BoundingBox b2) {
+	return b1.min_x <= b2.min_x &&
+		b1.min_y <= b2.min_y &&
+		b1.max_x >= b2.max_x &&
+		b1.max_y >= b2.max_y;
+}
+
+// A function that filters out nested boxes.
+void filter_nested_boxes(BoundingBoxList* bbl) {
+	if (bbl->count < 2) return;
+
+	bool* is_nested = (bool*)calloc(bbl->count, sizeof(bool));
+	if (!is_nested) return;
+
+	for (int i = 0; i < bbl->count; i++) {
+		for (int j = 0; j < bbl->count; j++) {
+			if (i == j) continue;
+			// If box j is fully contained within box i, mark box j for removal.
+			if (is_box_fully_contained(bbl->boxes[i], bbl->boxes[j])) {
+				is_nested[j] = true;
+			}
+		}
+	}
+
+	// Rebuild the list with only the non-nested boxes.
+	BoundingBoxList filtered_bbl;
+	init_bbox_list(&filtered_bbl);
+	for (int i = 0; i < bbl->count; i++) {
+		if (!is_nested[i]) {
+			add_bbox(&filtered_bbl, bbl->boxes[i]);
+		}
+	}
+
+	free(bbl->boxes);
+	*bbl = filtered_bbl;
+	free(is_nested);
+}
+
+// Add this entire function to the bottom of selective_search.c.
+
+void filter_proposals_by_geometry(BoundingBoxList* bbl, int img_width, int img_height) {
+	BoundingBoxList filtered_bbl;
+	init_bbox_list(&filtered_bbl);
+
+	float min_size_ratio = 0.001f;  // Filters out boxes smaller than 0.1% of the total image size.
+	float max_size_ratio = 0.95f;   // Filters out boxes larger than 95% of the total image size.
+	float max_aspect_ratio = 10.0f; // Filters out boxes with an aspect ratio (width/height or height/width) greater than 10.
+	long img_area = (long)img_width * img_height;
+
+	for (int i = 0; i < bbl->count; i++) {
+		BoundingBox box = bbl->boxes[i];
+		long box_w = box.max_x - box.min_x;
+		long box_h = box.max_y - box.min_y;
+
+		if (box_w <= 0 || box_h <= 0) continue;
+
+		// Size filtering
+		long box_area = box_w * box_h;
+		if ((float)box_area / img_area < min_size_ratio || (float)box_area / img_area > max_size_ratio) {
+			continue;
+		}
+
+		// Aspect ratio filtering
+		float aspect_ratio = (float)box_w / box_h;
+		if (aspect_ratio > max_aspect_ratio || aspect_ratio < (1.0f / max_aspect_ratio)) {
+			continue;
+		}
+
+		add_bbox(&filtered_bbl, box);
+	}
+
+	// Replace the original list with the filtered list.
+	free(bbl->boxes);
+	*bbl = filtered_bbl;
+}
+
+// Add or modify in selective_search.c
+
+void init_similarity_list(SimilarityList* sl, int initial_capacity) {
+	sl->count = 0;
+	sl->capacity = initial_capacity > 0 ? initial_capacity : 1024;
+	sl->similarities = (Similarity*)malloc(sizeof(Similarity) * sl->capacity);
+}
+
+// Implementation of the Selective Search pipeline function.
+BoundingBoxList run_selective_search_pipeline(Image* original_img, ColorSpaceType cs_type, float k, float min_size_factor, float iou_threshold) {
+    const char* cs_name = (cs_type == COLOR_SPACE_RGB) ? "RGB" : "Lab";
+    printf("\n--- Running Pipeline for Color Space: %s (k=%.1f) ---\n", cs_name, k);
+
+    BoundingBoxList final_proposals;
+    init_bbox_list(&final_proposals);
+
+    Image base_img = copy_image(original_img);
+    Image color_img; // The color image used for feature extraction.
+    Image gbs_img;   // The input image for Graph-Based Segmentation.
+
+    bool conversion_ok = false;
+    switch (cs_type) {
+    case COLOR_SPACE_RGB:
+        color_img = copy_image(&base_img);
+        gbs_img = copy_image(&base_img);
+        conversion_ok = (color_img.pixels && gbs_img.pixels);
+        break;
+    case COLOR_SPACE_LAB_L_CHANNEL:
+        convert_image_to_lab(&base_img, &color_img);
+        gbs_img.width = color_img.width; gbs_img.height = color_img.height; gbs_img.channels = 1;
+        gbs_img.pixels = (Pixel*)malloc(sizeof(Pixel) * gbs_img.width * gbs_img.height);
+        if (gbs_img.pixels) {
+            for (int i = 0; i < gbs_img.width * gbs_img.height; i++) gbs_img.pixels[i].r = color_img.pixels[i].r;
+        }
+        conversion_ok = (color_img.pixels && gbs_img.pixels);
+        break;
+    }
+
+    if (!conversion_ok) {
+        fprintf(stderr, "Error during image preparation for colorspace %d\n", cs_type);
+        free(base_img.pixels);
+        return final_proposals;
+    }
+
+    // --- GBS, SS, and Filtering (same process for all color spaces) ---
+    DisjointSet ds;
+    if (cs_type == COLOR_SPACE_LAB_L_CHANNEL) {
+        graph_based_segmentation_grayscale(&ds, &gbs_img, k);
+    }
+    else {
+        graph_based_segmentation(&ds, &gbs_img, k, 2.0f);
+    }
+
+    RegionList rl = create_regions(&color_img, &ds);
+    printf("Before merge: %d active regions\n", count_active_regions(&rl));
+
+    selective_search_merge(&rl, &ds, &final_proposals, 10000, min_size_factor);
+
+    // Free intermediate memory.
+    free(base_img.pixels);
+    free(color_img.pixels);
+    free(gbs_img.pixels);
+    ds_free(&ds);
+    rl_free(&rl);
+
+    printf("Pipeline for %s finished. Generated %d proposals.\n", cs_name, final_proposals.count);
+    return final_proposals;
 }
